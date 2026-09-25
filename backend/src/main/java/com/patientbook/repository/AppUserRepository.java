@@ -1,7 +1,11 @@
 package com.patientbook.repository;
 
 import com.patientbook.entity.AppUser;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -46,4 +50,13 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     // can never be resolved as a practitioner even if it were somehow left
     // bookable=true.
     Optional<AppUser> findByIdAndTenantIdAndRole(Long id, Long tenantId, String role);
+
+    // Row lock on the practitioner, taken at the start of any booking/edit that
+    // checks their calendar for overlaps. The overlap check is read-then-insert,
+    // so without this two simultaneous requests for the same doctor could both
+    // see a free slot and both insert. Holding the lock until the transaction
+    // commits serializes bookings per practitioner (other doctors are unaffected).
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM AppUser u WHERE u.id = :id")
+    Optional<AppUser> findByIdForUpdate(@Param("id") Long id);
 }

@@ -2,7 +2,6 @@ package com.patientbook.controller;
 
 import com.patientbook.dto.*;
 import com.patientbook.entity.AppUser;
-import com.patientbook.repository.AppointmentRepository;
 import com.patientbook.repository.ClinicHolidayRepository;
 import com.patientbook.security.CurrentUserProvider;
 import com.patientbook.service.DoctorAvailabilityService;
@@ -14,8 +13,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 // Everything here always operates on the caller's OWN account — there is no
 // path-variable practitioner id to trust. Public, patient-facing reads
@@ -27,7 +24,6 @@ public class DoctorController {
 
     private final DoctorAvailabilityService doctorAvailabilityService;
     private final CurrentUserProvider currentUserProvider;
-    private final AppointmentRepository appointmentRepository;
     private final ClinicHolidayRepository clinicHolidayRepository;
 
     @GetMapping("/profile")
@@ -38,22 +34,21 @@ public class DoctorController {
 
     // Available slots on the caller's own calendar — used by the dashboard's
     // manual "Schedule Appointment" flow (distinct from the public,
-    // slug-scoped /public/{slug}/slots read).
+    // slug-scoped /public/{slug}/slots read). The optional `duration` is the
+    // session length (minutes) the practitioner intends to book; only start
+    // times where a session that long fits are returned.
     @GetMapping("/slots")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<List<String>> getMySlots(@RequestParam LocalDate date, @RequestParam(required = false) String mode) {
+    public ResponseEntity<List<String>> getMySlots(@RequestParam LocalDate date,
+                                                    @RequestParam(required = false) String mode,
+                                                    @RequestParam(required = false) Integer duration) {
         Long ownerId = currentUserProvider.getCurrentUserId();
         // Clinic closures/holidays are tenant-wide; slot-conflict is scoped
         // to this specific doctor's own calendar (a colleague's booking at
         // the same time isn't a conflict for me). Mode-agnostic, same as
         // the public /slots endpoint.
         boolean isHoliday = clinicHolidayRepository.findByHolidayDateAndPsychologistId(date, currentUserProvider.getCurrentTenantId()).isPresent();
-        Set<String> booked = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(date, ownerId)
-                .stream()
-                .filter(a -> !"CANCELLED".equals(a.getStatus()))
-                .map(a -> a.getStartTime().toString().substring(0, 5))
-                .collect(Collectors.toSet());
-        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(ownerId, date, booked, isHoliday, mode));
+        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(ownerId, date, isHoliday, mode, duration));
     }
 
     // Which services EXIST is a clinic-wide catalog (tenant-scoped); which of
@@ -140,6 +135,7 @@ public class DoctorController {
         List<String> days = (List<String>) body.get("daysOfWeek");
         String startTime = (String) body.get("startTime");
         String endTime   = (String) body.get("endTime");
+        if (body.get("intervalMinutes") == null) throw new IllegalArgumentException("Session length is required");
         int interval     = Integer.parseInt(body.get("intervalMinutes").toString());
         String mode      = (String) body.get("mode");
         return ResponseEntity.ok(doctorAvailabilityService.addAvailabilityBlocks(

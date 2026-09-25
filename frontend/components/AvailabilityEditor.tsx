@@ -10,6 +10,7 @@ import {
   getAvailabilityBlocks, addAvailabilityBlocks, removeAvailabilityBlock, clearDayBlocks,
   getDateOverrides, addDateOverride, removeDateOverride, DateOverride, AvailabilityBlock,
 } from "../lib/profileApi";
+import { sessionLengthOptions } from "../lib/sessionLength";
 
 const DAYS_OF_WEEK = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
 
@@ -175,8 +176,11 @@ export default function AvailabilityEditor({ staffId }: { staffId?: number } = {
         setBlockForm(f => ({ ...f, selectedDays: [] }));
         await reload();
       }
-    } catch {
-      toast.error('Failed to apply block');
+    } catch (err: any) {
+      // The server now validates the block (times, session length, days) and
+      // says exactly what's wrong — show that rather than a generic failure.
+      const msg = err?.response?.data?.message;
+      toast.error(typeof msg === 'string' && msg.trim() ? msg : 'Failed to apply block');
     } finally {
       setSaving(false);
     }
@@ -282,13 +286,9 @@ export default function AvailabilityEditor({ staffId }: { staffId?: number } = {
     return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
   };
 
-  const INTERVALS = [
-    { value: 30, label: '30 min' },
-    { value: 45, label: '45 min' },
-    { value: 60, label: '60 min' },
-    { value: 90, label: '90 min' },
-    { value: 120, label: '2 hrs' },
-  ];
+  // Same list the manual-scheduling forms offer, so a length picked here is
+  // always available there (and vice versa).
+  const INTERVALS = sessionLengthOptions(blockForm.intervalMinutes);
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
 
@@ -340,6 +340,10 @@ export default function AvailabilityEditor({ staffId }: { staffId?: number } = {
             </select>
           </div>
         </div>
+        <p className="text-[11px] text-gray-500 -mt-1 mb-4">
+          Session length sets the gap between bookable start times, and is the default length when you schedule a
+          patient into this time manually — you can still adjust it per patient there.
+        </p>
 
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="text-xs text-gray-500 font-semibold">Quick:</span>

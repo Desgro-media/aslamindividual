@@ -4,6 +4,7 @@ import com.patientbook.dto.AppointmentDto;
 import com.patientbook.dto.BookingRequest;
 import com.patientbook.dto.ConvertDemoRequest;
 import com.patientbook.dto.DemoBookingRequest;
+import com.patientbook.dto.ManualBookingRequest;
 import com.patientbook.dto.RebookRequestDto;
 import com.patientbook.security.CurrentUserProvider;
 import com.patientbook.service.AppointmentService;
@@ -41,7 +42,7 @@ public class AppointmentController {
     // omitted, it defaults to the caller's own calendar. ──────────────────
     @PostMapping("/appointments/manual")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<AppointmentDto> scheduleManually(@RequestBody BookingRequest request) {
+    public ResponseEntity<AppointmentDto> scheduleManually(@Valid @RequestBody ManualBookingRequest request) {
         return ResponseEntity.ok(appointmentService.scheduleManually(
                 request, currentUserProvider.getCurrentTenantId(), currentUserProvider.getCurrentUserId()));
     }
@@ -98,10 +99,18 @@ public class AppointmentController {
         Long staffId       = body.get("staffId") != null && !body.get("staffId").isBlank()
                 ? Long.parseLong(body.get("staffId")) : null;
 
+        Integer durationMinutes = parseOptionalMinutes(body.get("durationMinutes"));
+
         Long tenantId = currentUserProvider.getCurrentTenantId();
         Long callerOwnId = currentUserProvider.getCurrentUserId();
         return ResponseEntity.ok(appointmentService.recordPastSession(
-                patientId, tenantId, callerOwnId, staffId, date, time, sessionType, notes, status, mode));
+                patientId, tenantId, callerOwnId, staffId, date, time, sessionType, notes, status, mode, durationMinutes));
+    }
+
+    // Blank/absent -> null ("keep / use the service default"). A non-numeric
+    // value throws NumberFormatException, which GlobalExceptionHandler maps to a 400.
+    private static Integer parseOptionalMinutes(String raw) {
+        return raw == null || raw.isBlank() ? null : Integer.valueOf(raw.trim());
     }
 
     // ── Protected endpoints — always scoped to the caller's own account ───
@@ -158,7 +167,8 @@ public class AppointmentController {
         String sessionType = body.get("sessionType");
         String notes       = body.get("notes");
         String mode        = body.get("mode");
+        Integer durationMinutes = parseOptionalMinutes(body.get("durationMinutes"));
         return ResponseEntity.ok(appointmentService.updateAppointmentDetails(
-                id, currentUserProvider.getCurrentTenantId(), date, time, sessionType, notes, mode));
+                id, currentUserProvider.getCurrentTenantId(), date, time, sessionType, notes, mode, durationMinutes));
     }
 }

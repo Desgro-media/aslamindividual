@@ -5,6 +5,7 @@ import com.patientbook.dto.BookingRequest;
 import com.patientbook.dto.ConvertDemoRequest;
 import com.patientbook.dto.DemoBookingRequest;
 import com.patientbook.dto.InvoiceDto;
+import com.patientbook.dto.ManualBookingRequest;
 import com.patientbook.dto.RebookRequestDto;
 import com.patientbook.entity.Appointment;
 import com.patientbook.entity.AppUser;
@@ -74,7 +75,9 @@ public class AppointmentService {
         // read-side staff/services/slots endpoints in PublicController use
         // the same validator, so both sides agree on who's bookable).
         Long assignedDoctorId = staffResolutionService.resolveBookableDoctorId(owner, request.getStaffId());
-        return bookAppointmentForOwner(request, owner.getId(), assignedDoctorId);
+        // A public booking never gets a custom length or deferred payment —
+        // those are practitioner-only decisions (see scheduleManually).
+        return bookAppointmentForOwner(request, owner.getId(), assignedDoctorId, null, false);
     }
 
     // A lapsed subscription blocks new bookings from reaching this
@@ -92,13 +95,32 @@ public class AppointmentService {
 
     // ── Manual scheduling from the dashboard ───────────────────────────────
     @Transactional
-    public AppointmentDto scheduleManually(BookingRequest request, Long tenantId, Long callerOwnId) {
+    public AppointmentDto scheduleManually(ManualBookingRequest request, Long tenantId, Long callerOwnId) {
         Long assignedDoctorId = staffResolutionService.resolveTenantStaffId(tenantId, callerOwnId, request.getStaffId());
-        return bookAppointmentForOwner(request, tenantId, assignedDoctorId);
+
+        BookingRequest booking = new BookingRequest();
+        booking.setPatientName(request.getPatientName());
+        booking.setPatientEmail(request.getPatientEmail());
+        booking.setPatientPhone(request.getPatientPhone());
+        booking.setAppointmentDate(request.getAppointmentDate());
+        booking.setStartTime(request.getStartTime());
+        booking.setSessionType(request.getSessionType());
+        booking.setNotes(request.getNotes());
+        booking.setMode(request.getMode());
+
+        // Only meaningful here — the therapist explicitly chose "pass to
+        // receptionist" instead of the patient paying online.
+        boolean toReception = "RECEPTION".equals(request.getPaymentHandledBy());
+        return bookAppointmentForOwner(booking, tenantId, assignedDoctorId, request.getDurationMinutes(), toReception);
     }
 
+    // requestedDurationMinutes: the practitioner's chosen session length, or
+    // null to use the selected service's own length. Only ever non-null from
+    // the authenticated dashboard path (or a rebook carrying over the original
+    // appointment's length) — never from a public request body.
     @Transactional
-    public AppointmentDto bookAppointmentForOwner(BookingRequest request, Long tenantId, Long assignedDoctorId) {
+    public AppointmentDto bookAppointmentForOwner(BookingRequest request, Long tenantId, Long assignedDoctorId,
+                                                  Integer requestedDurationMinutes, boolean toReception) {
 
         // 1. Find or create patient (identified by phone, scoped to this tenant —
         // shared across every staff member in a clinic)
@@ -117,9 +139,12 @@ public class AppointmentService {
                     return patientRepository.save(newPatient);
                 });
 
-        // 2. Determine session duration (try to parse from service, default 60 min) —
-        // the service catalog is tenant-wide, so this stays keyed by tenantId
-        int slotDuration = resolveSessionDurationMinutes(request.getSessionType(), tenantId);
+        // 2. Determine session duration — the practitioner's explicit pick if
+        // there is one, else the selected service's own length (default 60).
+        // The service catalog is tenant-wide, so that lookup is keyed by tenantId.
+        int slotDuration = requestedDurationMinutes != null
+                ? SessionDurations.requireValid(requestedDurationMinutes)
+                : resolveSessionDurationMinutes(request.getSessionType(), tenantId);
 
         // 2b. Resolve + validate mode against what this doctor actually
         // offers, BEFORE anything is persisted — fail closed rather than
@@ -144,14 +169,12 @@ public class AppointmentService {
         // right before the row is inserted. Deliberately mode-agnostic —
         // one physical doctor can't run two sessions at once regardless of
         // channel, see DoctorAvailabilityService's slot-conflict note.
-        LocalTime newEndTime = request.getStartTime().plusMinutes(slotDuration);
-        boolean overlaps = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(request.getAppointmentDate(), assignedDoctorId)
-                .stream()
-                .filter(a -> !"CANCELLED".equals(a.getStatus()))
-                .anyMatch(a -> a.getStartTime().isBefore(newEndTime) && request.getStartTime().isBefore(a.getEndTime()));
-        if (overlaps) {
-            throw new IllegalStateException("This slot was just booked — please choose another time.");
-        }
+        // The practitioner row is locked first so two simultaneous requests
+        // for the same doctor can't both pass this check and both insert.
+        LocalTime newEndTime = SessionDurations.endOf(request.getStartTime(), slotDuration);
+        userRepository.findByIdForUpdate(assignedDoctorId);
+        assertSlotFree(assignedDoctorId, request.getAppointmentDate(), request.getStartTime(), newEndTime, null,
+                "This slot was just booked — please choose another time.");
 
         // 3. Generate a unique 25-char tracking token
         String trackingToken = UUID.randomUUID().toString().replace("-", "").substring(0, 25);
@@ -160,11 +183,10 @@ public class AppointmentService {
         List<Appointment> previousActive = appointmentRepository.findMostRecentActiveByPatientId(patient.getId());
         Long previousAppointmentId = previousActive.isEmpty() ? null : previousActive.get(0).getId();
 
-        // Only meaningful for manual dashboard scheduling — the therapist
-        // explicitly chose "pass to receptionist" instead of the patient
-        // paying online. The public booking endpoint never sets this field,
-        // so bookAppointment (online) is completely unaffected.
-        boolean toReception = "RECEPTION".equals(request.getPaymentHandledBy());
+        // toReception (param) is only ever true from manual dashboard
+        // scheduling — the therapist explicitly chose "pass to receptionist"
+        // instead of the patient paying online. It is a method parameter, not
+        // a field of the request body, so a public booking can never set it.
 
         // 5. Build and save the appointment
         Appointment appointment = Appointment.builder()
@@ -256,10 +278,17 @@ public class AppointmentService {
         // Tenant AND the specific practitioner are both carried over from the
         // existing (already-verified) appointment, not re-derived from client
         // input — a rebook must land back with the same doctor, not silently
-        // fall back to the clinic owner.
+        // fall back to the clinic owner. The session length is carried over
+        // too: the practitioner may have set it for this specific booking, and
+        // a patient rebooking after a cancellation shouldn't quietly reset it
+        // to the service default. (Server-derived from the stored appointment,
+        // never from the request body.)
         Long carriedAssignedDoctorId = oldAppointment.getAssignedDoctorId() != null
                 ? oldAppointment.getAssignedDoctorId() : oldAppointment.getPsychologistId();
-        return bookAppointmentForOwner(newRequest, oldAppointment.getPsychologistId(), carriedAssignedDoctorId);
+        int originalMinutes = SessionDurations.minutesBetween(oldAppointment.getStartTime(), oldAppointment.getEndTime());
+        Integer carriedDuration = SessionDurations.isValid(originalMinutes) ? originalMinutes : null;
+        return bookAppointmentForOwner(newRequest, oldAppointment.getPsychologistId(), carriedAssignedDoctorId,
+                carriedDuration, false);
     }
 
     // ── Get appointments for a practitioner (always scoped to the caller) ──
@@ -429,7 +458,7 @@ public class AppointmentService {
 
         appointment.setAppointmentDate(request.getAppointmentDate());
         appointment.setStartTime(request.getStartTime());
-        appointment.setEndTime(request.getStartTime().plusMinutes(slotDuration));
+        appointment.setEndTime(SessionDurations.endOf(request.getStartTime(), slotDuration));
         appointment.setSessionType(resolvedSessionType);
         appointment.setMode(mode);
         appointment.setAssignedDoctorId(assignedDoctorId);
@@ -471,16 +500,51 @@ public class AppointmentService {
     }
 
     // ── Update appointment details ─────────────────────────────────────────
+    // durationMinutes: the practitioner's new session length, or null to keep
+    // whatever the appointment already has. This used to recompute the end
+    // time from the service's default length whenever a start time was sent —
+    // and the dashboard's edit form always sends one — so any edit, even
+    // fixing a typo in the notes, silently reset a custom session length.
     @Transactional
     public AppointmentDto updateAppointmentDetails(Long id, Long ownerId, LocalDate date, LocalTime startTime,
-                                                    String sessionType, String notes, String mode) {
+                                                    String sessionType, String notes, String mode,
+                                                    Integer durationMinutes) {
         Appointment appt = appointmentRepository.findByIdAndPsychologistId(id, ownerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Appointment not found: " + id));
-        if (date != null) appt.setAppointmentDate(date);
-        if (startTime != null) {
-            int duration = resolveSessionDurationMinutes(appt.getSessionType(), ownerId);
-            appt.setStartTime(startTime);
-            appt.setEndTime(startTime.plusMinutes(duration));
+        if (mode != null && !"ONLINE".equals(mode) && !"OFFLINE".equals(mode)) {
+            throw new IllegalArgumentException("Mode must be ONLINE or OFFLINE");
+        }
+
+        if (date != null || startTime != null || durationMinutes != null) {
+            LocalDate newDate = date != null ? date : appt.getAppointmentDate();
+            LocalTime newStart = startTime != null ? startTime : appt.getStartTime();
+            int currentMinutes = SessionDurations.minutesBetween(appt.getStartTime(), appt.getEndTime());
+            int minutes;
+            if (durationMinutes != null) {
+                minutes = SessionDurations.requireValid(durationMinutes);
+            } else if (SessionDurations.isValid(currentMinutes)) {
+                minutes = currentMinutes; // keep the length the practitioner already set
+            } else {
+                // Placeholder/corrupt row (e.g. a demo-call request, stored 00:00–00:00):
+                // there is no real length to keep, so fall back to the service's.
+                minutes = resolveSessionDurationMinutes(sessionType != null ? sessionType : appt.getSessionType(), ownerId);
+            }
+            LocalTime newEnd = SessionDurations.endOf(newStart, minutes);
+
+            // Only re-check the calendar if the occupied range actually moved —
+            // a notes-only save on a row that already overlaps something (legacy
+            // data) must not start failing.
+            boolean rangeChanged = !newDate.equals(appt.getAppointmentDate())
+                    || !newStart.equals(appt.getStartTime()) || !newEnd.equals(appt.getEndTime());
+            if (rangeChanged && !"CANCELLED".equals(appt.getStatus())) {
+                Long doctorId = appt.getAssignedDoctorId() != null ? appt.getAssignedDoctorId() : appt.getPsychologistId();
+                userRepository.findByIdForUpdate(doctorId);
+                assertSlotFree(doctorId, newDate, newStart, newEnd, appt.getId(),
+                        "That time overlaps another session on this doctor's calendar — choose a different time or a shorter session length.");
+            }
+            appt.setAppointmentDate(newDate);
+            appt.setStartTime(newStart);
+            appt.setEndTime(newEnd);
         }
         if (sessionType != null) appt.setSessionType(sessionType);
         if (mode != null) appt.setMode(mode);
@@ -492,11 +556,17 @@ public class AppointmentService {
     @Transactional
     public AppointmentDto recordPastSession(Long patientId, Long tenantId, Long callerOwnId, Long requestedStaffId,
                                             LocalDate date, LocalTime time,
-                                            String sessionType, String notes, String status, String mode) {
+                                            String sessionType, String notes, String status, String mode,
+                                            Integer durationMinutes) {
         Patient patient = patientRepository.findByIdAndPrimaryPsychologistId(patientId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Patient not found: " + patientId));
+        if (mode != null && !"ONLINE".equals(mode) && !"OFFLINE".equals(mode)) {
+            throw new IllegalArgumentException("Mode must be ONLINE or OFFLINE");
+        }
 
-        int slotDuration = resolveSessionDurationMinutes(sessionType, tenantId);
+        int slotDuration = durationMinutes != null
+                ? SessionDurations.requireValid(durationMinutes)
+                : resolveSessionDurationMinutes(sessionType, tenantId);
         String resolvedStatus = (status != null && !status.isBlank()) ? status : "COMPLETED";
         Long assignedDoctorId = staffResolutionService.resolveTenantStaffId(tenantId, callerOwnId, requestedStaffId);
 
@@ -510,7 +580,7 @@ public class AppointmentService {
                 .patient(patient)
                 .appointmentDate(date)
                 .startTime(time)
-                .endTime(time.plusMinutes(slotDuration))
+                .endTime(SessionDurations.endOf(time, slotDuration))
                 .status(resolvedStatus)
                 .sessionType(sessionType)
                 .mode(mode != null ? mode : "OFFLINE")
@@ -527,20 +597,36 @@ public class AppointmentService {
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    // Parse duration from the ClinicService duration string e.g. "50 min" → 50; default 60
+    // The selected service's own length (its free-text duration, e.g. "50 min",
+    // "1 hr", "1.5 hours"); default 60. This is only the DEFAULT — the
+    // practitioner can override it per appointment.
     private int resolveSessionDurationMinutes(String sessionType, Long ownerId) {
-        if (sessionType == null) return 60;
+        if (sessionType == null) return SessionDurations.DEFAULT_MINUTES;
         try {
             Long serviceId = Long.parseLong(sessionType);
-            String durationStr = clinicServiceRepository.findByIdAndPsychologistId(serviceId, ownerId)
-                    .map(s -> s.getDuration()).orElse(null);
-            if (durationStr != null) {
-                // Parse strings like "50 min", "80 min", "1.5 hr"
-                String digits = durationStr.replaceAll("[^0-9]", "");
-                if (!digits.isEmpty()) return Integer.parseInt(digits);
-            }
-        } catch (NumberFormatException ignored) {}
-        return 60;
+            return clinicServiceRepository.findByIdAndPsychologistId(serviceId, ownerId)
+                    .map(s -> SessionDurations.parseServiceDuration(s.getDuration()))
+                    .orElse(SessionDurations.DEFAULT_MINUTES);
+        } catch (NumberFormatException ignored) {
+            return SessionDurations.DEFAULT_MINUTES;
+        }
+    }
+
+    // Authoritative calendar-conflict check for one practitioner on one date.
+    // `excludeAppointmentId` lets an edit ignore the appointment being moved.
+    // Mode-agnostic on purpose (one person can't run two sessions at once) and
+    // keyed by the specific practitioner, not the tenant, so two doctors in the
+    // same clinic can be booked at the same time.
+    private void assertSlotFree(Long doctorId, LocalDate date, LocalTime start, LocalTime end,
+                                Long excludeAppointmentId, String conflictMessage) {
+        boolean overlaps = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(date, doctorId)
+                .stream()
+                .filter(a -> !"CANCELLED".equals(a.getStatus()))
+                .filter(a -> excludeAppointmentId == null || !excludeAppointmentId.equals(a.getId()))
+                .anyMatch(a -> SessionDurations.overlaps(start, end, a.getStartTime(), a.getEndTime()));
+        if (overlaps) {
+            throw new IllegalStateException(conflictMessage);
+        }
     }
 
     public AppointmentDto mapToDto(Appointment appointment) {

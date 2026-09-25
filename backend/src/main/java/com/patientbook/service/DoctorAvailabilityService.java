@@ -12,8 +12,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -40,6 +43,9 @@ public class DoctorAvailabilityService {
     private final DoctorServicePriceRepository servicePriceRepository;
     private final ClinicServiceRepository clinicServiceRepository;
     private final DoctorAvailabilityBlockRepository blockRepository;
+    private final AppointmentRepository appointmentRepository;
+
+    private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     private static String resolveMode(String mode) {
         return mode != null ? mode : OFFLINE;
@@ -333,23 +339,52 @@ public class DoctorAvailabilityService {
     public List<AvailabilityBlockDto> addAvailabilityBlocks(Long psychologistId, List<String> daysOfWeek,
                                                             String startTime, String endTime,
                                                             int intervalMinutes, String mode) {
+        // Everything is validated BEFORE anything is saved. This used to trust
+        // the request body completely: an interval of 0 (or a negative one) was
+        // stored as-is and then made getAvailableSlotsForDoctor loop forever on
+        // every later slot fetch — including the public booking page's —
+        // pinning a server thread per request; unparseable times failed the
+        // same fetch with a 500 instead of failing here with a clear 400.
+        if (daysOfWeek == null || daysOfWeek.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one day");
+        }
+        LocalTime start = parseBlockTime(startTime, "Start time");
+        LocalTime end = parseBlockTime(endTime, "End time");
+        if (!start.isBefore(end)) {
+            throw new IllegalArgumentException("Start time must be before end time");
+        }
+        SessionDurations.requireValid(intervalMinutes);
+        if (mode != null && !ONLINE.equals(mode) && !OFFLINE.equals(mode)) {
+            throw new IllegalArgumentException("Mode must be ONLINE or OFFLINE");
+        }
+        Set<String> validDays = Arrays.stream(DayOfWeek.values()).map(Enum::name).collect(Collectors.toSet());
+        List<String> days = new ArrayList<>();
+        for (String day : daysOfWeek) {
+            String upper = day == null ? "" : day.trim().toUpperCase();
+            if (!validDays.contains(upper)) {
+                throw new IllegalArgumentException("Invalid day of week: " + day);
+            }
+            if (!days.contains(upper)) days.add(upper);
+        }
+        String startHhMm = start.format(HH_MM);
+        String endHhMm = end.format(HH_MM);
+
         AppUser psychologist = userRepository.findById(psychologistId)
                 .orElseThrow(() -> new ResourceNotFoundException("Doctor not found: " + psychologistId));
         String resolvedMode = resolveMode(mode);
         List<AvailabilityBlockDto> created = new ArrayList<>();
-        for (String day : daysOfWeek) {
-            String upperDay = day.toUpperCase();
+        for (String upperDay : days) {
             boolean alreadyExists = blockRepository.findByPsychologistIdAndDayOfWeekAndMode(psychologistId, upperDay, resolvedMode)
                     .stream()
-                    .anyMatch(b -> startTime.equals(b.getStartTime()) && endTime.equals(b.getEndTime()) && intervalMinutes == b.getIntervalMinutes());
+                    .anyMatch(b -> startHhMm.equals(b.getStartTime()) && endHhMm.equals(b.getEndTime()) && intervalMinutes == b.getIntervalMinutes());
             if (alreadyExists) continue;
 
             DoctorAvailabilityBlock block = blockRepository.save(
                     DoctorAvailabilityBlock.builder()
                             .psychologist(psychologist)
                             .dayOfWeek(upperDay)
-                            .startTime(startTime)
-                            .endTime(endTime)
+                            .startTime(startHhMm)
+                            .endTime(endHhMm)
                             .intervalMinutes(intervalMinutes)
                             .mode(resolvedMode)
                             .build());
@@ -363,6 +398,17 @@ public class DoctorAvailabilityService {
                     .build());
         }
         return created;
+    }
+
+    private static LocalTime parseBlockTime(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(label + " is required");
+        }
+        try {
+            return LocalTime.parse(value.trim());
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(label + " must be in HH:mm format");
+        }
     }
 
     // ── Delete a single availability block (ownership-checked) ──────────────────
@@ -381,17 +427,25 @@ public class DoctorAvailabilityService {
 
     // ── Compute available slots for a doctor, in a given mode, on a given
     // date ─────────────────────────────────────────────────────────────
-    // Used by the public booking endpoint and internally by AppointmentService.
-    // Only the OPEN-WINDOW sources (legacy weekly slots, blocks, overrides)
-    // are mode-filtered. `bookedSlots` must be computed by the caller across
-    // ALL modes for this doctor — a doctor is one physical person and can't
-    // run a same-time ONLINE and OFFLINE session simultaneously, so booked-
-    // slot conflict checking is deliberately mode-agnostic.
+    // Used by the public booking endpoint and the dashboard's manual-scheduling
+    // slot pickers. Only the OPEN-WINDOW sources (legacy weekly slots, blocks,
+    // overrides) are mode-filtered. Existing appointments are looked up here
+    // across ALL modes for this doctor — a doctor is one physical person and
+    // can't run a same-time ONLINE and OFFLINE session simultaneously, so
+    // booked-slot conflict checking is deliberately mode-agnostic.
+    //
+    // sessionMinutes is the length the caller intends to book (the doctor's
+    // pick in manual scheduling). A start time is only offered if a session of
+    // that length starting there would not collide with an existing
+    // appointment — matching the authoritative overlap check at booking time,
+    // so the picker never offers a time the booking would then reject. Null
+    // (the public flow, which doesn't know the length yet) still hides any
+    // start time that falls inside an existing appointment.
     public List<String> getAvailableSlotsForDoctor(Long psychologistId, LocalDate date,
-                                                    Set<String> bookedSlots,
-                                                    boolean isHoliday, String mode) {
+                                                    boolean isHoliday, String mode, Integer sessionMinutes) {
         if (isHoliday) return Collections.emptyList();
         String resolvedMode = resolveMode(mode);
+        int candidateMinutes = sessionMinutes != null ? SessionDurations.requireValid(sessionMinutes) : 1;
 
         String dayOfWeek = date.getDayOfWeek().name();
         Set<String> slots = new LinkedHashSet<>();
@@ -403,13 +457,19 @@ public class DoctorAvailabilityService {
                 .forEach(s -> slots.add(s.getSlotTime()));
 
         // 2. New block-based availability — generate slots from each block
-        // that belongs to the requested mode's calendar.
+        // that belongs to the requested mode's calendar. Walks integer
+        // minutes-of-day rather than LocalTime: LocalTime.plusMinutes wraps at
+        // midnight, so a late block (e.g. 20:00–23:45 every 2h) never satisfied
+        // `time < end` again after wrapping and looped forever.
         for (DoctorAvailabilityBlock block : blockRepository.findByPsychologistIdAndDayOfWeekAndMode(psychologistId, dayOfWeek, resolvedMode)) {
-            LocalTime time = LocalTime.parse(block.getStartTime());
-            LocalTime end  = LocalTime.parse(block.getEndTime());
-            while (time.isBefore(end)) {
-                slots.add(time.toString().substring(0, 5)); // "HH:mm"
-                time = time.plusMinutes(block.getIntervalMinutes());
+            int interval = block.getIntervalMinutes();
+            if (interval <= 0) continue; // corrupt row — would never advance
+            LocalTime blockStart = tryParseTime(block.getStartTime());
+            LocalTime blockEnd = tryParseTime(block.getEndTime());
+            if (blockStart == null || blockEnd == null) continue;
+            int endMinute = blockEnd.getHour() * 60 + blockEnd.getMinute();
+            for (int t = blockStart.getHour() * 60 + blockStart.getMinute(); t < endMinute; t += interval) {
+                slots.add(String.format("%02d:%02d", t / 60, t % 60)); // "HH:mm"
             }
         }
 
@@ -426,15 +486,38 @@ public class DoctorAvailabilityService {
             }
         }
 
-        // 4. Remove already-booked slots, and — for today — slots whose start
-        // time has already passed, so patients/staff can't book into the past.
+        // 4. Remove slots that collide with an existing (non-cancelled)
+        // appointment, and — for today — slots whose start time has already
+        // passed, so patients/staff can't book into the past. A slot that can't
+        // be parsed as HH:mm, or whose session would run past midnight, can
+        // never be booked, so it is dropped rather than offered.
+        List<Appointment> active = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(date, psychologistId)
+                .stream()
+                .filter(a -> !"CANCELLED".equals(a.getStatus()))
+                .collect(Collectors.toList());
         boolean isToday = date.isEqual(LocalDate.now());
         LocalTime now = LocalTime.now();
         return slots.stream()
-                .filter(s -> !bookedSlots.contains(s))
-                .filter(s -> !isToday || LocalTime.parse(s).isAfter(now))
+                .filter(s -> {
+                    LocalTime start = tryParseTime(s);
+                    if (start == null) return false;
+                    if (isToday && !start.isAfter(now)) return false;
+                    if (start.getHour() * 60 + start.getMinute() + candidateMinutes >= 24 * 60) return false;
+                    LocalTime end = start.plusMinutes(candidateMinutes);
+                    return active.stream().noneMatch(a ->
+                            start.equals(a.getStartTime())
+                                    || SessionDurations.overlaps(start, end, a.getStartTime(), a.getEndTime()));
+                })
                 .sorted()
                 .collect(Collectors.toList());
+    }
+
+    private static LocalTime tryParseTime(String value) {
+        try {
+            return value == null ? null : LocalTime.parse(value);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     // ── Summarize which dates could possibly have a slot, for a given mode ──

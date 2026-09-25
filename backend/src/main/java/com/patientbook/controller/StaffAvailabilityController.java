@@ -4,7 +4,6 @@ import com.patientbook.dto.AvailabilityBlockDto;
 import com.patientbook.dto.DoctorDateOverrideDto;
 import com.patientbook.dto.DoctorServicePriceDto;
 import com.patientbook.entity.AppUser;
-import com.patientbook.repository.AppointmentRepository;
 import com.patientbook.repository.ClinicHolidayRepository;
 import com.patientbook.security.CurrentUserProvider;
 import com.patientbook.service.DoctorAvailabilityService;
@@ -17,8 +16,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 // Lets a clinic OWNER manage a specific staff member's services/pricing and
 // availability directly, instead of requiring that staff member to log in
@@ -44,7 +41,6 @@ public class StaffAvailabilityController {
     private final DoctorAvailabilityService doctorAvailabilityService;
     private final StaffService staffService;
     private final CurrentUserProvider currentUserProvider;
-    private final AppointmentRepository appointmentRepository;
     private final ClinicHolidayRepository clinicHolidayRepository;
 
     private AppUser requireOwnedStaff(Long staffId) {
@@ -62,15 +58,11 @@ public class StaffAvailabilityController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<String>> getStaffSlots(@PathVariable Long staffId,
                                                         @RequestParam LocalDate date,
-                                                        @RequestParam(required = false) String mode) {
+                                                        @RequestParam(required = false) String mode,
+                                                        @RequestParam(required = false) Integer duration) {
         AppUser staff = requireOwnedStaff(staffId);
         boolean isHoliday = clinicHolidayRepository.findByHolidayDateAndPsychologistId(date, staff.getTenantId()).isPresent();
-        Set<String> booked = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(date, staff.getId())
-                .stream()
-                .filter(a -> !"CANCELLED".equals(a.getStatus()))
-                .map(a -> a.getStartTime().toString().substring(0, 5))
-                .collect(Collectors.toSet());
-        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(staff.getId(), date, booked, isHoliday, mode));
+        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(staff.getId(), date, isHoliday, mode, duration));
     }
 
     // ── Services & pricing ──────────────────────────────────────────────
@@ -108,6 +100,7 @@ public class StaffAvailabilityController {
         List<String> days = (List<String>) body.get("daysOfWeek");
         String startTime = (String) body.get("startTime");
         String endTime   = (String) body.get("endTime");
+        if (body.get("intervalMinutes") == null) throw new IllegalArgumentException("Session length is required");
         int interval     = Integer.parseInt(body.get("intervalMinutes").toString());
         String mode      = (String) body.get("mode");
         return ResponseEntity.ok(doctorAvailabilityService.addAvailabilityBlocks(

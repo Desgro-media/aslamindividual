@@ -13,8 +13,11 @@ import api from './api';
 // OFFLINE server-side. staffId is optional like the rest of this file — pass
 // a clinic owner's chosen staff member's id to read THEIR calendar instead
 // of the caller's own (see StaffAvailabilityController.getStaffSlots).
-export const getMySlots = async (date: string, mode?: 'ONLINE' | 'OFFLINE', staffId?: number): Promise<string[]> => {
-    const qs = `date=${date}${mode ? `&mode=${mode}` : ''}`;
+// durationMinutes is optional — pass the session length being booked and only
+// start times where a session that long fits without colliding with another
+// appointment come back.
+export const getMySlots = async (date: string, mode?: 'ONLINE' | 'OFFLINE', staffId?: number, durationMinutes?: number): Promise<string[]> => {
+    const qs = `date=${date}${mode ? `&mode=${mode}` : ''}${durationMinutes ? `&duration=${durationMinutes}` : ''}`;
     const res = await api.get(staffId ? `/staff/${staffId}/slots?${qs}` : `/me/slots?${qs}`);
     return res.data;
 };

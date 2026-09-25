@@ -47,7 +47,6 @@ public class PublicController {
     private final DoctorAvailabilityService doctorAvailabilityService;
     private final PatientRepository patientRepository;
     private final com.patientbook.repository.ClinicHolidayRepository clinicHolidayRepository;
-    private final com.patientbook.repository.AppointmentRepository appointmentRepository;
     private final StaffResolutionService staffResolutionService;
     private final com.patientbook.service.SubscriptionService subscriptionService;
     private final LeadService leadService;
@@ -143,14 +142,10 @@ public class PublicController {
         // to the specific practitioner so two different doctors in the same
         // clinic can be booked at the same time. Booked-slot exclusion is
         // deliberately mode-agnostic (see DoctorAvailabilityService) — only
-        // the open-window calendar lookup below is mode-filtered.
+        // the open-window calendar lookup is mode-filtered. No `duration`
+        // param on the public side: patients never choose the session length.
         boolean isHoliday = clinicHolidayRepository.findByHolidayDateAndPsychologistId(date, owner.getId()).isPresent();
-        java.util.Set<String> booked = appointmentRepository.findByAppointmentDateAndAssignedDoctorId(date, doctorId)
-                .stream()
-                .filter(a -> !"CANCELLED".equals(a.getStatus()))
-                .map(a -> a.getStartTime().toString().substring(0, 5))
-                .collect(Collectors.toSet());
-        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(doctorId, date, booked, isHoliday, mode));
+        return ResponseEntity.ok(doctorAvailabilityService.getAvailableSlotsForDoctor(doctorId, date, isHoliday, mode, null));
     }
 
     @GetMapping("/holidays")

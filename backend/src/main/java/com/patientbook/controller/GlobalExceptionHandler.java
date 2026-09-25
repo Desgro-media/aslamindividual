@@ -6,11 +6,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.format.DateTimeParseException;
 import java.util.Map;
@@ -116,6 +118,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({DateTimeParseException.class, NumberFormatException.class})
     public ResponseEntity<Map<String, String>> handleParsing(Exception ex) {
         return ResponseEntity.badRequest().body(Map.of("message", "Invalid date/time or number format: " + ex.getMessage()));
+    }
+
+    // A request body Jackson can't bind — text where a number belongs
+    // ("durationMinutes": "abc"), a malformed date, broken JSON. Both this and
+    // the query-param case below are RuntimeExceptions, so without their own
+    // handlers they fell into the catch-all at the bottom and came back as a
+    // 500 "unexpected error" for what is plainly the caller's mistake. The
+    // message is fixed on purpose: Jackson's own text quotes the offending
+    // payload and internal class names.
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        return ResponseEntity.badRequest()
+                .body(Map.of("message", "The request could not be read — please check the values you entered."));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> handleParamTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.badRequest().body(Map.of("message", "Invalid value for '" + ex.getName() + "'."));
     }
 
     // Deliberately does NOT return ex.getMessage() to the client — an

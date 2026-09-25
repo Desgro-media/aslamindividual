@@ -22,7 +22,11 @@ import {
 import api from "../../../../lib/api";
 import { CHART, useThemeMode, SeriesTooltip } from "../../../../lib/chartTheme";
 import { SpotlightDiv } from "../../../../components/Spotlight";
-import { getMySlots, getMyServices, DoctorServicePrice } from "../../../../lib/profileApi";
+import { getMySlots, getMyServices, getAvailabilityBlocks, DoctorServicePrice, AvailabilityBlock } from "../../../../lib/profileApi";
+import {
+  MIN_SESSION_MINUTES, MAX_SESSION_MINUTES, DEFAULT_SESSION_MINUTES,
+  sessionLengthOptions, parseServiceDuration, minutesBetween, addMinutesToTime,
+} from "../../../../lib/sessionLength";
 
 // ── Custom dropdown (dark-mode safe — avoids native <select> OS rendering) ───
 function CalDrop({ label, options, onSelect }: {
@@ -230,6 +234,31 @@ function ModeToggle({ value, onChange }: { value: "ONLINE" | "OFFLINE"; onChange
   );
 }
 
+// How long a session runs — the practitioner decides, per appointment. Shared
+// by the schedule / past-session / edit-session forms so they offer the same
+// choices as the availability editor's "Session length". `value` "" only
+// occurs on the edit form's "keep existing" option.
+function SessionLengthSelect({ value, onChange, keepExisting = false, compact = false }: {
+  value: number | "";
+  onChange: (v: number | "") => void;
+  keepExisting?: boolean;
+  compact?: boolean;
+}) {
+  const options = sessionLengthOptions(typeof value === "number" ? value : null);
+  return (
+    <select
+      aria-label="Session length"
+      className="nm-input"
+      style={{ width: "100%", padding: compact ? "10px 12px" : 12, borderRadius: compact ? 12 : 14, color: "var(--text-1)" }}
+      value={value}
+      onChange={e => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+    >
+      {keepExisting && <option value="">-- Keep existing --</option>}
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -312,7 +341,13 @@ export default function ClientTimelinePage() {
   const [schedMode, setSchedMode] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
   const [schedDoctorId, setSchedDoctorId] = useState(""); // "" = myself
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [schedSaving, setSchedSaving] = useState(false);
+  // The doctor's explicit session-length pick. null = "not chosen yet" — the
+  // effective length then follows the selected service's own length (see
+  // schedDuration below). Always sent explicitly on submit, so what the form
+  // shows is exactly what gets saved.
+  const [schedDurationOverride, setSchedDurationOverride] = useState<number | null>(null);
 
   // Per-doctor service pricing, so the Schedule modal only offers services the
   // selected practitioner has actually priced for the selected mode. Without
@@ -321,6 +356,12 @@ export default function ClientTimelinePage() {
   // no catalogue-fee fallback — see DoctorAvailabilityService.resolveBookablePrice).
   // Keyed by doctor id; key 0 = the logged-in user ("myself").
   const [servicePricingByDoctor, setServicePricingByDoctor] = useState<Record<number, DoctorServicePrice[]>>({});
+
+  // Each doctor's weekly availability blocks (same keying as above). The
+  // "Session length" set on a block in Settings → Availability is the doctor's
+  // own decision of how long a session runs, so it's what the Schedule form
+  // defaults to for that day — see schedDefault below.
+  const [availabilityByDoctor, setAvailabilityByDoctor] = useState<Record<number, Record<string, AvailabilityBlock[]>>>({});
 
   const [pastModalOpen, setPastModalOpen]   = useState(false);
   const [pastDate, setPastDate]             = useState("");
@@ -331,6 +372,7 @@ export default function ClientTimelinePage() {
   const [pastStatus, setPastStatus]         = useState("COMPLETED");
   const [pastNotes, setPastNotes]           = useState("");
   const [pastSaving, setPastSaving]         = useState(false);
+  const [pastDurationOverride, setPastDurationOverride] = useState<number | null>(null);
 
   // Risk flag modal states
   const [riskModalOpen, setRiskModalOpen] = useState(false);
@@ -356,7 +398,10 @@ export default function ClientTimelinePage() {
   // Edit session state
   const [editSessionOpen, setEditSessionOpen]   = useState(false);
   const [editSessionId, setEditSessionId]       = useState<number | null>(null);
-  const [editSessionForm, setEditSessionForm]   = useState({ appointmentDate: "", startTime: "", sessionType: "", notes: "", mode: "" });
+  const [editSessionForm, setEditSessionForm]   = useState<{
+    appointmentDate: string; startTime: string; sessionType: string; notes: string; mode: string;
+    durationMinutes: number | ""; // "" = keep the appointment's existing length
+  }>({ appointmentDate: "", startTime: "", sessionType: "", notes: "", mode: "", durationMinutes: "" });
   const [editSessionSaving, setEditSessionSaving] = useState(false);
 
   // Schedule modal payment state. "RECEPTION" means the therapist is
@@ -485,12 +530,16 @@ export default function ClientTimelinePage() {
         sessionType:     editSessionForm.sessionType     || undefined,
         mode:            editSessionForm.mode            || undefined,
         notes:           editSessionForm.notes,
+        // Omitted = the server keeps the appointment's current length.
+        durationMinutes: editSessionForm.durationMinutes === "" ? undefined : String(editSessionForm.durationMinutes),
       });
       setAppointments(prev => prev.map(a => a.id === editSessionId ? { ...a, ...res.data } : a));
       setEditSessionOpen(false);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Failed to update session");
+      // e.g. "That time overlaps another session on this doctor's calendar…"
+      const msg = e?.response?.data?.message;
+      alert(typeof msg === "string" && msg.trim() ? msg : "Failed to update session");
     } finally {
       setEditSessionSaving(false);
     }
@@ -549,14 +598,68 @@ export default function ClientTimelinePage() {
     }
   };
 
-  const fetchAvailableSlots = async (dateStr: string, mode: "ONLINE" | "OFFLINE" = schedMode, doctorId: string = schedDoctorId) => {
-    try {
-      const res = await getMySlots(dateStr, mode, doctorId ? Number(doctorId) : undefined);
-      setAvailableSlots(Array.isArray(res) ? res : []);
-    } catch {
-      setAvailableSlots([]);
+  // What the Schedule form's session length defaults to, in priority order:
+  //   1. the session length the doctor set in Settings → Availability for this
+  //      weekday + mode — only when every block that day/mode agrees on one
+  //      value (with mixed lengths there's no single "the" length, so it
+  //      doesn't guess);
+  //   2. the selected service's own length;
+  //   3. 60 minutes.
+  const schedDefault = useMemo<{ minutes: number; source: "availability" | "service" | "fallback" }>(() => {
+    const blocksByDay = availabilityByDoctor[schedDoctorId ? Number(schedDoctorId) : 0];
+    if (blocksByDay && schedDate) {
+      const weekday = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][new Date(schedDate + "T00:00:00").getDay()];
+      const lengths = new Set(
+        (blocksByDay[weekday] ?? []).filter(b => b.mode === schedMode).map(b => b.intervalMinutes)
+      );
+      if (lengths.size === 1) {
+        const minutes = Array.from(lengths)[0];
+        if (minutes >= MIN_SESSION_MINUTES && minutes <= MAX_SESSION_MINUTES) return { minutes, source: "availability" };
+      }
     }
-  };
+    const svc = services.find(s => s.id.toString() === schedType);
+    return svc
+      ? { minutes: parseServiceDuration(svc.duration), source: "service" }
+      : { minutes: DEFAULT_SESSION_MINUTES, source: "fallback" };
+  }, [availabilityByDoctor, schedDoctorId, schedDate, schedMode, schedType, services]);
+
+  // The session length the Schedule form will book: the doctor's own pick if
+  // they made one, otherwise the default above.
+  const schedDuration = schedDurationOverride ?? schedDefault.minutes;
+
+  const pastDuration = useMemo(() => {
+    if (pastDurationOverride !== null) return pastDurationOverride;
+    const svc = services.find(s => s.id.toString() === pastType);
+    return svc ? parseServiceDuration(svc.duration) : DEFAULT_SESSION_MINUTES;
+  }, [pastDurationOverride, pastType, services]);
+
+  // Load the open start times for whatever the Schedule form currently has
+  // selected. One effect keyed on everything that changes the answer (date,
+  // mode, doctor AND session length — a longer session leaves fewer valid
+  // start times) instead of ad-hoc fetches in each change handler. The
+  // `cancelled` flag drops a response that arrives after the inputs have
+  // already moved on, so a slow reply for an earlier date can never overwrite
+  // the slots for the date now showing.
+  useEffect(() => {
+    if (!scheduleModalOpen || !schedDate) { setSlotsLoading(false); return; }
+    let cancelled = false;
+    setSlotsLoading(true);
+    getMySlots(schedDate, schedMode, schedDoctorId ? Number(schedDoctorId) : undefined, schedDuration)
+      .then(res => {
+        if (cancelled) return;
+        const list = Array.isArray(res) ? res : [];
+        setAvailableSlots(list);
+        // A previously picked time that no longer fits the new length is dropped.
+        setSchedTime(t => (t && list.includes(t) ? t : ""));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAvailableSlots([]);
+        setSchedTime("");
+      })
+      .finally(() => { if (!cancelled) setSlotsLoading(false); });
+    return () => { cancelled = true; };
+  }, [scheduleModalOpen, schedDate, schedMode, schedDoctorId, schedDuration]);
 
   const fetchServices = () => {
     if (services.length === 0) {
@@ -577,6 +680,16 @@ export default function ClientTimelinePage() {
     getMyServices(doctorId ? Number(doctorId) : undefined)
       .then(rows => setServicePricingByDoctor(prev => ({ ...prev, [key]: rows })))
       .catch(() => setServicePricingByDoctor(prev => ({ ...prev, [key]: [] })));
+  };
+
+  // Same idea for the doctor's availability blocks; a failed load just leaves
+  // the length defaulting to the service's, as before.
+  const fetchAvailability = (doctorId: string) => {
+    const key = doctorId ? Number(doctorId) : 0;
+    if (availabilityByDoctor[key]) return;
+    getAvailabilityBlocks(doctorId ? Number(doctorId) : undefined)
+      .then(blocks => setAvailabilityByDoctor(prev => ({ ...prev, [key]: blocks ?? {} })))
+      .catch(() => setAvailabilityByDoctor(prev => ({ ...prev, [key]: {} })));
   };
 
   // clinicServiceIds the currently-selected Schedule doctor offers in the
@@ -603,17 +716,20 @@ export default function ClientTimelinePage() {
 
   const openScheduleModal = () => {
     setSchedDate(""); setSchedTime(""); setSchedType(""); setSchedMode("OFFLINE"); setSchedDoctorId("");
+    setSchedDurationOverride(null);
     setSchedPayStatus("AWAITING"); setSchedPayAmount(""); setSchedPayMethod("CASH");
-    setAvailableSlots([]);
+    setAvailableSlots([]); setSlotsLoading(false);
     setScheduleModalOpen(true);
     fetchServices();
     fetchServicePricing("");
+    fetchAvailability("");
     const defaultAcc = bankAccounts.find(b => b.isDefault) ?? bankAccounts[0] ?? null;
     setSchedBankAccountId(defaultAcc?.id ?? "");
     setSchedBankAccountName(defaultAcc?.accountName ?? "");
   };
   const openPastModal = () => {
     setPastDate(""); setPastTime(""); setPastType(""); setPastMode("OFFLINE"); setPastDoctorId(""); setPastNotes(""); setPastStatus("COMPLETED");
+    setPastDurationOverride(null);
     setPastPayStatus("PAID"); setPastPayAmount(""); setPastPayMethod("CASH");
     setPastModalOpen(true);
     fetchServices();
@@ -642,11 +758,15 @@ export default function ClientTimelinePage() {
         staffId: schedDoctorId ? Number(schedDoctorId) : undefined,
         notes: "",
         paymentHandledBy: schedPayStatus === "RECEPTION" ? "RECEPTION" : undefined,
+        // The length shown in the form — sent explicitly so the booking never
+        // silently falls back to a different default server-side.
+        durationMinutes: schedDuration,
       });
       setAppointments(prev => [res.data, ...prev]);
       await applyPaymentAfterCreate(res.data.id, schedPayStatus, schedPayAmount, schedPayMethod, schedBankAccountId, schedBankAccountName);
       setScheduleModalOpen(false);
       setSchedDate(""); setSchedTime(""); setSchedType(""); setSchedMode("OFFLINE"); setSchedDoctorId("");
+      setSchedDurationOverride(null);
       setSchedPayStatus("AWAITING"); setSchedPayAmount(""); setSchedPayMethod("CASH");
       setSchedBankAccountId(""); setSchedBankAccountName("");
     } catch (err: any) {
@@ -675,11 +795,13 @@ export default function ClientTimelinePage() {
         staffId:         pastDoctorId || undefined,
         status:          pastStatus,
         notes:           pastNotes,
+        durationMinutes: String(pastDuration),
       });
       setAppointments(prev => [res.data, ...prev]);
       await applyPaymentAfterCreate(res.data.id, pastPayStatus, pastPayAmount, pastPayMethod, pastBankAccountId, pastBankAccountName);
       setPastModalOpen(false);
       setPastDate(""); setPastTime(""); setPastType(""); setPastMode("OFFLINE"); setPastDoctorId(""); setPastNotes(""); setPastStatus("COMPLETED");
+      setPastDurationOverride(null);
       setPastPayStatus("PAID"); setPastPayAmount(""); setPastPayMethod("CASH");
       setPastBankAccountId(""); setPastBankAccountName("");
     } catch (err: any) {
@@ -1361,6 +1483,10 @@ export default function ClientTimelinePage() {
                             {apt.sessionType ? (services.find(s => s.id.toString() === apt.sessionType)?.name || apt.sessionType.replace(/_/g, " ")) : "Session"}
                             <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-3)", display: "flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
                               <Clock style={{ width: 14, height: 14 }} /> {apt.startTime}
+                              {(() => {
+                                const len = minutesBetween(apt.startTime, apt.endTime);
+                                return len > 0 ? <span style={{ marginLeft: 4, whiteSpace: "nowrap" }}>· {len} min</span> : null;
+                              })()}
                             </span>
                           </h3>
                         </div>
@@ -1419,6 +1545,12 @@ export default function ClientTimelinePage() {
                                 sessionType: apt.sessionType || "",
                                 notes: apt.notes || "",
                                 mode: apt.mode || "",
+                                // Prefill with the length it actually has; a placeholder
+                                // row with no real length falls back to "keep existing".
+                                durationMinutes: (() => {
+                                  const len = minutesBetween(apt.startTime, apt.endTime);
+                                  return len >= MIN_SESSION_MINUTES && len <= MAX_SESSION_MINUTES ? len : "";
+                                })(),
                               });
                               setEditSessionOpen(true);
                             }}
@@ -1747,7 +1879,15 @@ export default function ClientTimelinePage() {
                       className="nm-input"
                       style={{ width: "100%", padding: 12, borderRadius: 14, color: "var(--text-1)" }}
                       value={schedType}
-                      onChange={e => setSchedType(e.target.value)}
+                      onChange={e => {
+                        setSchedType(e.target.value);
+                        // When the length is coming from the service, a
+                        // different service brings its own default — drop any
+                        // earlier manual pick so the two can't disagree. When
+                        // it comes from the doctor's availability the service
+                        // doesn't affect it, so the pick stays.
+                        if (schedDefault.source !== "availability") setSchedDurationOverride(null);
+                      }}
                       disabled={noneOffered}
                     >
                       <option value="">-- Choose a service --</option>
@@ -1776,11 +1916,12 @@ export default function ClientTimelinePage() {
                       const next = e.target.value;
                       setSchedDoctorId(next);
                       setSchedTime("");
-                      // Each doctor has their own calendar — re-fetch slots
-                      // for whichever one is now selected.
-                      if (schedDate) fetchAvailableSlots(schedDate, schedMode, next);
-                      // ...and their own priced service list.
+                      // Each doctor has their own calendar — the slots effect
+                      // re-fetches for whichever one is now selected...
+                      // ...and they have their own priced service list and
+                      // their own availability (which sets the default length).
                       fetchServicePricing(next);
+                      fetchAvailability(next);
                     }}
                   >
                     <option value="">Myself</option>
@@ -1797,9 +1938,34 @@ export default function ClientTimelinePage() {
                   setSchedMode(m);
                   setSchedTime("");
                   // Online and in-person can be genuinely separate calendars —
-                  // re-fetch slots for the newly selected mode's calendar.
-                  if (schedDate) fetchAvailableSlots(schedDate, m);
+                  // the slots effect re-fetches for the new mode's calendar.
                 }} />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 8 }}>Session Length</label>
+                <SessionLengthSelect
+                  value={schedDuration}
+                  onChange={v => { if (v !== "") setSchedDurationOverride(v); }}
+                />
+                <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6, lineHeight: 1.5 }}>
+                  {schedDefault.source === "availability"
+                    ? `Default ${schedDefault.minutes} min — the session length in ${schedDoctorId ? "the doctor's" : "your"} ${schedMode === "ONLINE" ? "online" : "in-person"} availability for ${new Date(schedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" })}s.`
+                    : schedDefault.source === "service"
+                      ? `Default ${schedDefault.minutes} min — the service's usual length. Pick a date to use your availability's session length instead.`
+                      : `Default ${schedDefault.minutes} min.`}
+                  {" "}You can change it for this patient; only times where a session this long fits are offered. The fee
+                  doesn&apos;t change with the length — use Amount below to adjust it.
+                  {schedDurationOverride !== null && schedDurationOverride !== schedDefault.minutes && (
+                    <>
+                      {" "}
+                      <button type="button" onClick={() => setSchedDurationOverride(null)}
+                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>
+                        Reset to {schedDefault.minutes} min
+                      </button>
+                    </>
+                  )}
+                </p>
               </div>
 
               <div>
@@ -1813,7 +1979,6 @@ export default function ClientTimelinePage() {
                   onChange={e => {
                     setSchedDate(e.target.value);
                     setSchedTime("");
-                    fetchAvailableSlots(e.target.value, schedMode);
                   }}
                 />
               </div>
@@ -1821,8 +1986,10 @@ export default function ClientTimelinePage() {
               {schedDate && (
                 <div>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 8 }}>Time</label>
-                  {availableSlots.length === 0 ? (
-                    <p style={{ fontSize: 13, color: "var(--warning)" }}>No available slots for this date.</p>
+                  {slotsLoading ? (
+                    <p style={{ fontSize: 13, color: "var(--text-3)" }}>Checking available times…</p>
+                  ) : availableSlots.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "var(--warning)" }}>No available slots for this date and session length.</p>
                   ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                       {availableSlots.map(time => (
@@ -1842,6 +2009,11 @@ export default function ClientTimelinePage() {
                         </button>
                       ))}
                     </div>
+                  )}
+                  {!slotsLoading && schedTime && addMinutesToTime(schedTime, schedDuration) && (
+                    <p style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600, marginTop: 10 }}>
+                      Session runs {schedTime} – {addMinutesToTime(schedTime, schedDuration)} ({schedDuration} min)
+                    </p>
                   )}
                 </div>
               )}
@@ -1922,7 +2094,7 @@ export default function ClientTimelinePage() {
               <div>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 8 }}>Session Type</label>
                 <select className="nm-input" style={{ width: "100%", padding: 12, borderRadius: 14, color: "var(--text-1)" }}
-                  value={pastType} onChange={e => setPastType(e.target.value)}>
+                  value={pastType} onChange={e => { setPastType(e.target.value); setPastDurationOverride(null); }}>
                   <option value="">-- Choose a service --</option>
                   {services.map(s => <option key={s.id} value={s.id.toString()}>{s.name}</option>)}
                 </select>
@@ -1944,6 +2116,14 @@ export default function ClientTimelinePage() {
               <div>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 8 }}>Mode</label>
                 <ModeToggle value={pastMode} onChange={setPastMode} />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 8 }}>Session Length</label>
+                <SessionLengthSelect
+                  value={pastDuration}
+                  onChange={v => { if (v !== "") setPastDurationOverride(v); }}
+                />
               </div>
 
               <div>
@@ -2112,7 +2292,7 @@ export default function ClientTimelinePage() {
       {/* Edit Session Modal */}
       {editSessionOpen && typeof document !== "undefined" && createPortal(
         <div className="overlay-enter" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 9999 }} onClick={() => setEditSessionOpen(false)}>
-          <div className="soft-card anim-scale-in" style={{ width: "100%", maxWidth: 460, padding: 32 }} onClick={e => e.stopPropagation()}>
+          <div className="soft-card anim-scale-in" style={{ width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", padding: 32 }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: "var(--text-1)" }}>Edit Session</h3>
               <button onClick={() => setEditSessionOpen(false)} className="icon-btn"><X style={{ width: 20, height: 20 }} /></button>
@@ -2146,6 +2326,12 @@ export default function ClientTimelinePage() {
                 <input type="time" className="nm-input" value={editSessionForm.startTime}
                   onChange={e => setEditSessionForm(p => ({ ...p, startTime: e.target.value }))}
                   style={{ width: "100%", padding: "10px 12px", borderRadius: 12, color: "var(--text-1)" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 6, textTransform: "uppercase" }}>Session Length</label>
+                <SessionLengthSelect keepExisting compact
+                  value={editSessionForm.durationMinutes}
+                  onChange={v => setEditSessionForm(p => ({ ...p, durationMinutes: v }))} />
               </div>
               <div>
                 <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-3)", marginBottom: 6, textTransform: "uppercase" }}>Notes (optional)</label>

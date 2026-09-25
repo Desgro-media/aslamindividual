@@ -3,6 +3,7 @@ package com.patientbook.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -40,7 +41,7 @@ public class BookingRequest {
     // predate this feature, e.g. record-past-session). Always re-validated
     // against the resolved doctor's actual offerings before it's trusted,
     // never taken at face value — see AppointmentService.bookAppointmentForOwner.
-    @Size(max = 10)
+    @Pattern(regexp = "ONLINE|OFFLINE", message = "Mode must be ONLINE or OFFLINE")
     private String mode;
 
     // Which practitioner's public booking link this came through — the
@@ -56,13 +57,9 @@ public class BookingRequest {
     // practitioners and for a clinic's default/first-available booking.
     private Long staffId;
 
-    // Only meaningful for manual (dashboard) scheduling — "RECEPTION" means
-    // the therapist deliberately deferred payment collection to the front
-    // desk instead of the patient paying online. Null/anything else is
-    // treated as "SELF" (today's behavior — payment link sent, patient pays
-    // online). The public booking endpoint never sends this, so online
-    // bookings are completely unaffected. See
-    // AppointmentService.bookAppointmentForOwner.
-    @Size(max = 20)
-    private String paymentHandledBy;
+    // Manual-only options (payment deferred to reception, a custom session
+    // length) live on ManualBookingRequest, NOT here: this class is the public
+    // booking form's body, so anything on it is settable by an anonymous
+    // visitor. paymentHandledBy used to sit here and let a patient skip
+    // payment by sending "RECEPTION".
 }
