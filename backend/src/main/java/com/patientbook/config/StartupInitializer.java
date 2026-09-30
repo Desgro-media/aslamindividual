@@ -85,7 +85,12 @@ public class StartupInitializer implements ApplicationRunner {
     // backfill source (see DoctorServicePriceRepository) while letting new
     // rows leave them null. Must run before backfillSessionModes() and
     // before any request can write a new DoctorServicePrice row.
+    // On a brand-new database the legacy columns never existed (the entity
+    // no longer maps them), so create them first — otherwise the ALTERs below
+    // and DoctorServicePriceRepository's backfill fail on a fresh install.
     private void relaxLegacyServicePriceConstraints() {
+        jdbcTemplate.execute("ALTER TABLE doctor_service_price ADD COLUMN IF NOT EXISTS price numeric(38,2)");
+        jdbcTemplate.execute("ALTER TABLE doctor_service_price ADD COLUMN IF NOT EXISTS offered boolean");
         jdbcTemplate.execute("ALTER TABLE doctor_service_price ALTER COLUMN price DROP NOT NULL");
         jdbcTemplate.execute("ALTER TABLE doctor_service_price ALTER COLUMN offered DROP NOT NULL");
     }
