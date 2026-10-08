@@ -89,7 +89,14 @@ function LoginForm() {
       });
       router.push("/dashboard");
     } catch (err) {
-      setError("Invalid email or password");
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setError(
+        status === 429
+          ? "Too many sign-in attempts from this network. Please wait a few minutes and try again."
+          : status === undefined || status >= 500
+            ? "Couldn't reach the server. Please try again in a moment."
+            : "Invalid email or password"
+      );
       setLoading(false);
     }
   };

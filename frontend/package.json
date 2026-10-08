@@ -11,7 +11,8 @@
     "embed": "tsx scripts/embed-migrations.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "telegram:webhook": "tsx scripts/telegram-webhook.ts",
-    "test:api": "tsx scripts/api-smoke.ts"
+    "test:api": "tsx scripts/api-smoke.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "@vercel/functions": "^3.4.4",
