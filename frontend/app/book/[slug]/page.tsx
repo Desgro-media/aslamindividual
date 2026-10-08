@@ -53,6 +53,7 @@ interface ApiService {
   serviceDescription: string;
   serviceDuration: string;
   serviceIcon: string;
+  serviceCategory?: string;
   onlinePrice: number | null;
   offlinePrice: number | null;
   onlineOffered: boolean;
@@ -225,6 +226,7 @@ export default function BookingPage() {
   const [slots, setSlots] = useState<string[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [sessionTypes, setSessionTypes] = useState<ApiService[]>([]);
+  const [sessionCategory, setSessionCategory] = useState<string>("ALL");
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [holidays, setHolidays] = useState<string[]>([]);
 
@@ -490,7 +492,15 @@ export default function BookingPage() {
   const selSessionPrice = selSessionObj
     ? (selectedMode === "ONLINE" ? selSessionObj.onlinePrice : selSessionObj.offlinePrice)
     : null;
-  const filteredSessions = sessionTypes.filter(s => selectedMode === "ONLINE" ? s.onlineOffered : s.offlineOffered);
+  const modeSessions = sessionTypes.filter(s => selectedMode === "ONLINE" ? s.onlineOffered : s.offlineOffered);
+  // Services are grouped Counselling / Therapy / Assessment / Career — a filter
+  // appears only when the practice actually offers more than one kind.
+  const PUBLIC_CATEGORIES = [
+    { value: "COUNSELLING", label: "Counselling" }, { value: "THERAPY", label: "Therapy" },
+    { value: "ASSESSMENT", label: "Assessment" }, { value: "CAREER", label: "Career" }, { value: "OTHER", label: "Other" },
+  ];
+  const presentCategories = PUBLIC_CATEGORIES.filter(c => modeSessions.some(s => (s.serviceCategory || "OTHER") === c.value));
+  const filteredSessions = modeSessions.filter(s => sessionCategory === "ALL" || (s.serviceCategory || "OTHER") === sessionCategory);
 
   if (infoLoading) {
     return <div style={{ minHeight: "100vh" }} />;
@@ -724,6 +734,26 @@ export default function BookingPage() {
                   <p style={{ fontSize: 12, color: "var(--text-3)" }}>No services configured yet.</p>
                 </div>
               ) : (
+                <>
+                {presentCategories.length > 1 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                    {[{ value: "ALL", label: "All" }, ...presentCategories].map(c => (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => setSessionCategory(c.value)}
+                        style={{
+                          padding: "6px 14px", borderRadius: 50, fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
+                          background: sessionCategory === c.value ? "var(--accent)" : "var(--bg)",
+                          color: sessionCategory === c.value ? "#fff" : "var(--text-2)",
+                          boxShadow: sessionCategory === c.value ? "2px 2px 8px #4a5bcc, -1px -1px 4px #8b9cf4" : "3px 3px 7px var(--sd), -3px -3px 7px var(--sl)",
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 28 }}>
                   {filteredSessions.map(s => {
                     const sid = String(s.clinicServiceId);
@@ -778,6 +808,7 @@ export default function BookingPage() {
                     );
                   })}
                 </div>
+                </>
               )}
 
               <div style={{ display: "flex", gap: 12 }}>

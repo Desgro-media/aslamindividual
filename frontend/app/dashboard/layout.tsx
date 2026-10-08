@@ -6,7 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Calendar, Users, Settings, Sparkles,
   LogOut, Activity, Menu, X, Bell, BarChart, Receipt, Search, ShieldCheck,
-  UserCog, Target, Wallet,
+  UserCog, Target, Wallet, CalendarDays, CalendarClock, FolderOpen, NotebookPen, FileBarChart, FileChartColumn,
 } from "lucide-react";
 import ThemeToggle from "../../components/ThemeToggle";
 import PhonePromptModal from "../../components/PhonePromptModal";
@@ -136,6 +136,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [user, setUser]             = useState<any>(null);
   const [pendingCount, setPending]  = useState(0);
+  // Therapist view: sessions that need their attention (finished but not
+  // completed, or completed without notes) — drives the Session Notes badge.
+  const [notesDue, setNotesDue]     = useState(0);
   const [sidebarOpen, setSidebar]   = useState(false);
   const [isMobile, setMobile]       = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -183,6 +186,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (!user) return;
+    if (user.tenantId && user.role === "ROLE_PSYCHOLOGIST") {
+      // A therapist's bell is about THEIR sessions, not the front desk's payment queue.
+      const fetchDue = () => {
+        api.get("/me/session-notes")
+          .then(res => setNotesDue((res.data?.pendingNotes?.length ?? 0) + (res.data?.awaitingCompletion?.length ?? 0)))
+          .catch(() => {});
+      };
+      fetchDue();
+      const t = setInterval(fetchDue, 30000);
+      return () => clearInterval(t);
+    }
     const fetchPending = () => {
       api.get("/appointments")
         .then(res => {
@@ -265,12 +279,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // page — everything else 404s at the API layer anyway (SubscriptionAccessFilter),
   // so there's no point showing nav links that would just bounce back here.
   const subscriptionBadge = locked ? 1 : (daysRemaining != null && daysRemaining <= 3 ? daysRemaining : undefined);
+
+  // The Psyfos therapist dashboard — Schedule, My Clients, Case History, Session
+  // Notes, Follow-up, My Session Reports. Anything the clinic owner has
+  // additionally granted this person (Analytics, Billing...) stays available.
+  const therapistNav: NavItem[] = [
+    { label: "Schedule",           icon: CalendarDays,  path: "/dashboard/schedule",      group: "Workspace" },
+    { label: "My Clients",         icon: Users,         path: "/dashboard/patients",      group: "Workspace" },
+    { label: "Case History",       icon: FolderOpen,    path: "/dashboard/case-history",  group: "Clinical" },
+    { label: "Session Notes",      icon: NotebookPen,   path: "/dashboard/session-notes", group: "Clinical", badge: notesDue },
+    { label: "Follow-up",          icon: CalendarClock, path: "/dashboard/follow-ups",    group: "Clinical" },
+    { label: "My Session Reports", icon: FileBarChart,  path: "/dashboard/my-reports",    group: "Clinical" },
+    ...(staffPermissions.includes("ANALYTICS") ? [{ label: "Analytics", icon: BarChart, path: "/dashboard/analytics", group: "Manage" }] : []),
+    ...(staffPermissions.includes("ANALYTICS") ? [{ label: "Monthly Report", icon: FileChartColumn, path: "/dashboard/reports", group: "Manage" }] : []),
+    ...(staffPermissions.includes("BILLING") ? [{ label: "Billing", icon: Receipt, path: "/dashboard/billing", group: "Manage" }] : []),
+    ...(staffPermissions.includes("BILLING") ? [{ label: "Pending Payments", icon: Wallet, path: "/dashboard/reception", group: "Manage" }] : []),
+    { label: "Settings",           icon: Settings,      path: "/dashboard/settings",      group: "System" },
+  ];
+
   const navItems: NavItem[] = locked
     ? [{ label: "Subscription", icon: ShieldCheck, path: "/dashboard/subscription", group: "Account", badge: subscriptionBadge }]
+    : isStaffDoctor
+    ? therapistNav
     : [
         { label: "Overview",      icon: LayoutDashboard, path: "/dashboard",              group: "Workspace" },
         ...(hasPermission("ANALYTICS") ? [{ label: "Analytics", icon: BarChart, path: "/dashboard/analytics", group: "Workspace" }] : []),
+        // The monthly management report — same gate as Analytics.
+        ...(hasPermission("ANALYTICS") ? [{ label: "Monthly Report", icon: FileChartColumn, path: "/dashboard/reports", group: "Workspace" }] : []),
         ...(hasPermission("APPOINTMENTS") ? [{ label: "Appointments", icon: Calendar, path: "/dashboard/appointments", group: "Manage", badge: pendingCount }] : []),
+        // Clients who are due back — set by the therapist, scheduled by the front desk.
+        ...(hasPermission("APPOINTMENTS") ? [{ label: "Follow-ups", icon: CalendarClock, path: "/dashboard/follow-ups", group: "Manage" }] : []),
         ...(hasPermission("PATIENTS") ? [{ label: "Patients", icon: Users, path: "/dashboard/patients", group: "Manage" }] : []),
         ...(hasPermission("PATIENTS") ? [{ label: "Leads", icon: Target, path: "/dashboard/leads", group: "Manage" }] : []),
         ...(hasPermission("BILLING") ? [{ label: "Billing", icon: Receipt, path: "/dashboard/billing", group: "Manage" }] : []),
@@ -292,11 +330,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ...(!isStaff ? [{ label: "Subscription", icon: ShieldCheck, path: "/dashboard/subscription", group: "System", badge: subscriptionBadge }] : []),
       ];
 
+  const PAGE_TITLES: Record<string, string> = {
+    "case-history": "Case History",
+    "session-notes": "Session Notes",
+    "follow-ups": "Follow-ups",
+    "my-reports": "My Session Reports",
+    "reports": "Monthly Report",
+    "schedule": "Schedule",
+    "reception": "Pending Payments",
+  };
   const pageTitle = (() => {
     const seg = pathname.split("/").pop();
-    if (!seg || seg === "dashboard") return "Overview";
-    return seg.charAt(0).toUpperCase() + seg.slice(1);
+    if (!seg || seg === "dashboard") return isStaffDoctor ? "Schedule" : "Overview";
+    if (seg === "patients" && isStaffDoctor) return "My Clients";
+    if (seg === "follow-ups" && isStaffDoctor) return "Follow-up";
+    return PAGE_TITLES[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
   })();
+
+  // A therapist's day starts at their Schedule (login -> view schedule), not the clinic overview.
+  useEffect(() => {
+    if (user && isStaffDoctor && !locked && pathname === "/dashboard") router.replace("/dashboard/schedule");
+  }, [user, isStaffDoctor, locked, pathname, router]);
+
+  const bellCount = isStaffDoctor ? notesDue : pendingCount;
 
   if (!user) return <div style={{ minHeight: "100vh" }} />;
 
@@ -448,7 +504,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 broken" rather than "nothing pending right now." The badge
                 is still the only part that's conditional. */}
             {hasPermission("APPOINTMENTS") && (
-              <Link href="/dashboard/appointments" style={{ position: "relative", display: "flex", textDecoration: "none" }}>
+              <Link href={isStaffDoctor ? "/dashboard/session-notes" : "/dashboard/appointments"} style={{ position: "relative", display: "flex", textDecoration: "none" }}>
                 <div style={{
                   width: 38, height: 38, borderRadius: "50%",
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -457,9 +513,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   border: "1px solid var(--glass-border-dim)",
                   boxShadow: "0 2px 10px var(--glass-shadow)",
                 }}>
-                  <Bell style={{ width: 16, height: 16, color: pendingCount > 0 ? "var(--accent)" : "var(--text-3)" }} />
+                  <Bell style={{ width: 16, height: 16, color: bellCount > 0 ? "var(--accent)" : "var(--text-3)" }} />
                 </div>
-                {pendingCount > 0 && (
+                {bellCount > 0 && (
                   <span className="badge-pop" style={{
                     position: "absolute", top: 0, right: 0,
                     width: 16, height: 16, borderRadius: "50%",
@@ -468,7 +524,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     display: "flex", alignItems: "center", justifyContent: "center",
                     boxShadow: "0 2px 6px rgba(245,158,11,0.4)",
                   }}>
-                    {pendingCount > 9 ? "9+" : pendingCount}
+                    {bellCount > 9 ? "9+" : bellCount}
                   </span>
                 )}
               </Link>

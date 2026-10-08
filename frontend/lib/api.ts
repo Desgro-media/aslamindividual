@@ -2,7 +2,7 @@ import axios from 'axios';
 import { clearSession } from './authSession';
 
 const api = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8087/api/v1',
+    baseURL: process.env.NEXT_PUBLIC_API_URL || '/api/v1',
 });
 
 // Add a request interceptor to attach JWT token

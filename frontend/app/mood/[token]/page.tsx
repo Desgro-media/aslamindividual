@@ -30,7 +30,7 @@ export default function MoodCheckInPage() {
     setSubmitting(true);
     setError("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1"}/mood`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api/v1"}/mood`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trackingToken: token, moodScore: selected + 1, note }),

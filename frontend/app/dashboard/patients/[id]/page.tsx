@@ -10,7 +10,7 @@ import {
   Search, ArrowDownUp, AlertCircle, Phone, Mail, Check,
   Download, Plus, BrainCircuit, TrendingUp, Star,
   Lock, Pencil, Save, Trash2, DollarSign, Smile, X, RefreshCw,
-  Paperclip, Loader2, UploadCloud, Video, MapPin, Stethoscope,
+  Paperclip, Loader2, UploadCloud, Video, MapPin, Stethoscope, Activity, CalendarClock, CalendarCheck,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -22,6 +22,12 @@ import {
 import api from "../../../../lib/api";
 import { CHART, useThemeMode, SeriesTooltip } from "../../../../lib/chartTheme";
 import { SpotlightDiv } from "../../../../components/Spotlight";
+import CaseStatusChip from "../../../../components/psyfos/CaseStatusChip";
+import CaseStatusModal from "../../../../components/psyfos/CaseStatusModal";
+import SetFollowUpModal from "../../../../components/psyfos/SetFollowUpModal";
+import FollowUpBookModal from "../../../../components/psyfos/FollowUpBookModal";
+import NewBookingWizard from "../../../../components/psyfos/NewBookingWizard";
+import { caseStatusMeta, fmtDay as psyFmtDay, fmtTime as psyFmtTime, relativeDay as psyRelativeDay, type FollowUp as PsyFollowUp } from "../../../../lib/psyfos";
 import { getMySlots, getMyServices, getAvailabilityBlocks, DoctorServicePrice, AvailabilityBlock } from "../../../../lib/profileApi";
 import {
   MIN_SESSION_MINUTES, MAX_SESSION_MINUTES, DEFAULT_SESSION_MINUTES,
@@ -195,6 +201,8 @@ function MiniCalendar({ value, onChange, maxDate }: {
 type Patient = {
   id: number; name: string; email: string; phone: string; createdAt: string; riskFlag?: boolean; riskReason?: string; riskFlaggedAt?: string;
   assignedDoctorId?: number | null;
+  caseStatus?: "NEW_CASE" | "ONGOING" | "PERIODIC_FOLLOW_UP" | "TERMINATED" | "DROPPED";
+  caseStatusUpdatedAt?: string | null; caseStatusReason?: string | null;
 };
 type Appointment = {
   id: number; appointmentDate: string; startTime: string; endTime: string;
@@ -302,15 +310,32 @@ export default function ClientTimelinePage() {
   // OTHER staff, never the caller's own row, so resolving "this patient's
   // assigned doctor is me" needs this separately.
   const [ownUser, setOwnUser] = useState<{ id: number; name: string; jobTitle: string | null } | null>(null);
+  // A receptionist/support login has no calendar of its own, so it books through
+  // the front-desk booking flow (pick a therapist, see their slots) rather than
+  // the "schedule on my own calendar" dialog below.
+  const [isPractitioner, setIsPractitioner] = useState(true);
+  const [wizardOpen, setWizardOpen] = useState(false);
   useEffect(() => {
     try {
       const user = JSON.parse(localStorage.getItem("user") || "null");
       if (user) {
         setIsClinicContext(!!user.tenantId || user.accountType === "CLINIC");
         setOwnUser({ id: user.id, name: user.name || user.username, jobTitle: user.jobTitle ?? null });
+        setIsPractitioner(!user.tenantId || user.role === "ROLE_PSYCHOLOGIST");
       }
     } catch { /* default to hidden if we can't tell */ }
   }, []);
+
+  // Psyfos: session status (New Case / Ongoing / ...) and the next follow-up.
+  const [caseInfo, setCaseInfo] = useState<{ statusLog: any[]; followUps: PsyFollowUp[] }>({ statusLog: [], followUps: [] });
+  const [caseModal, setCaseModal] = useState(false);
+  const [followModal, setFollowModal] = useState(false);
+  const [bookFollow, setBookFollow] = useState<PsyFollowUp | null>(null);
+  const loadCaseInfo = () => {
+    if (!params.id) return;
+    api.get(`/patients/${params.id}/case-history`).then(r => setCaseInfo(r.data)).catch(() => {});
+  };
+  useEffect(() => { loadCaseInfo(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params.id]);
 
   // Roster of bookable psychologists in this clinic, for the doctor picker
   // on the Schedule/Add Session modals below. GET /staff only succeeds for
@@ -663,8 +688,16 @@ export default function ClientTimelinePage() {
 
   const fetchServices = () => {
     if (services.length === 0) {
+      // /services needs the Settings permission, which therapists and front-desk
+      // logins don't have — they read the booking catalogue instead (same
+      // service names, limited to what the clinic actually offers).
       api.get("/services")
-        .catch(() => api.get("/services/public"))
+        .catch(() => api.get("/appointments/service-options").then(r => ({
+          data: (r.data ?? []).map((o: any) => ({
+            id: o.serviceId, name: o.name, description: o.description, duration: o.duration,
+            icon: o.icon, fee: 0, active: true, displayOrder: 0,
+          })),
+        })))
         .then(r => setServices(r.data))
         .catch(() => {});
     }
@@ -1124,7 +1157,7 @@ export default function ClientTimelinePage() {
             style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
             <Plus style={{ width: 15, height: 15, color: "var(--accent)" }} /> Add Note
           </button>
-          <button onClick={openScheduleModal} className="btn-nm"
+          <button onClick={isPractitioner ? openScheduleModal : () => setWizardOpen(true)} className="btn-nm"
             style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
             <Calendar style={{ width: 15, height: 15, color: "var(--accent)" }} /> Schedule
           </button>
@@ -1155,6 +1188,23 @@ export default function ClientTimelinePage() {
           </button>
         </div>
       </div>
+
+      {caseModal && (
+        <CaseStatusModal patient={{ id: patient.id, name: patient.name, caseStatus: patient.caseStatus }} onClose={() => setCaseModal(false)}
+          onSaved={(updated) => { setCaseModal(false); setPatient(prev => prev ? { ...prev, ...updated } : prev); loadCaseInfo(); }} />
+      )}
+      {followModal && (
+        <SetFollowUpModal patient={{ id: patient.id, name: patient.name }} onClose={() => setFollowModal(false)}
+          onSaved={() => { setFollowModal(false); loadCaseInfo(); }} />
+      )}
+      {bookFollow && (
+        <FollowUpBookModal followUp={bookFollow} onClose={() => setBookFollow(null)}
+          onBooked={() => { setBookFollow(null); loadCaseInfo(); api.get(`/patients/${patient.id}/appointments`).then(r => setAppointments(r.data)).catch(() => {}); }} />
+      )}
+      {wizardOpen && (
+        <NewBookingWizard prefill={{ name: patient.name, phone: patient.phone, email: patient.email }} onClose={() => setWizardOpen(false)}
+          onBooked={() => { api.get(`/patients/${patient.id}/appointments`).then(r => setAppointments(r.data)).catch(() => {}); loadCaseInfo(); }} />
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
@@ -1259,6 +1309,78 @@ export default function ClientTimelinePage() {
 
             </div>
           </SpotlightDiv>
+
+          {/* Session status & follow-up */}
+          {(() => {
+            const meta = caseStatusMeta(patient.caseStatus);
+            const openFu = caseInfo.followUps.find(f => f.status === "PENDING" || f.status === "BOOKED");
+            return (
+              <div className="soft-card" style={{ borderRadius: 24, padding: 28 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Activity style={{ width: 16, height: 16, color: "var(--accent)" }} /> Session status
+                  </h3>
+                  <button onClick={() => setCaseModal(true)} className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)" }}>
+                    <Pencil style={{ width: 12, height: 12 }} /> Update
+                  </button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <CaseStatusChip status={patient.caseStatus} />
+                  {patient.caseStatusUpdatedAt && (
+                    <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>since {psyFmtDay(patient.caseStatusUpdatedAt.slice(0, 10), { day: "numeric", month: "short", year: "numeric" })}</span>
+                  )}
+                </div>
+                <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 8 }}>{meta.hint}</p>
+                {patient.caseStatusReason && !meta.open && (
+                  <p style={{ fontSize: 12.5, color: "var(--text-2)", fontStyle: "italic", marginTop: 8 }}>“{patient.caseStatusReason}”</p>
+                )}
+
+                <div className="soft-card-2" style={{ borderRadius: 16, padding: "14px 16px", marginTop: 16 }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <CalendarClock style={{ width: 12, height: 12 }} /> Next follow-up
+                  </p>
+                  {openFu ? (
+                    <>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-1)" }}>
+                        {psyRelativeDay(openFu.appointmentDate ?? openFu.dueDate)}
+                        <span style={{ fontWeight: 500, color: "var(--text-3)", fontSize: 12 }}> · {psyFmtDay(openFu.appointmentDate ?? openFu.dueDate)}{openFu.appointmentStartTime ? ` · ${psyFmtTime(openFu.appointmentStartTime)}` : ""}</span>
+                      </p>
+                      <p style={{ fontSize: 11.5, color: openFu.status === "BOOKED" ? "var(--success)" : "var(--warning)", fontWeight: 600, marginTop: 3 }}>
+                        {openFu.status === "BOOKED" ? "Session booked" : "Date set — not booked yet"}
+                      </p>
+                      {openFu.note && <p style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6, fontStyle: "italic" }}>“{openFu.note}”</p>}
+                      {openFu.status === "PENDING" && (
+                        <button onClick={() => setBookFollow(openFu)} className="btn-nm-accent" style={{ marginTop: 12, padding: "7px 16px", fontSize: 12, fontWeight: 700, gap: 6 }}>
+                          <CalendarCheck style={{ width: 13, height: 13 }} /> Book session
+                        </button>
+                      )}
+                    </>
+                  ) : meta.open ? (
+                    <>
+                      <p style={{ fontSize: 13, color: "var(--text-3)" }}>None scheduled.</p>
+                      <button onClick={() => setFollowModal(true)} className="btn-nm" style={{ marginTop: 10, padding: "7px 14px", fontSize: 12, fontWeight: 700, gap: 6, color: "var(--accent)" }}>
+                        <Plus style={{ width: 13, height: 13 }} /> Schedule next follow-up
+                      </button>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 13, color: "var(--text-3)" }}>Not needed — this case is {meta.label.toLowerCase()}.</p>
+                  )}
+                </div>
+
+                {caseInfo.statusLog.length > 0 && (
+                  <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>History</p>
+                    {caseInfo.statusLog.slice(0, 4).map((l: any) => (
+                      <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+                        <CaseStatusChip status={l.toStatus} size="sm" />
+                        <span style={{ color: "var(--text-3)" }}>{l.createdAt ? psyFmtDay(l.createdAt.slice(0, 10), { day: "numeric", month: "short" }) : ""}{l.changedByName ? ` · ${l.changedByName}` : ""}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Attachments Card */}
           <div className="soft-card" style={{ borderRadius: 24, padding: 28 }}>

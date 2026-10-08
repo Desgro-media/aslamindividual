@@ -7,7 +7,7 @@ name: Uptime check
 #
 # One-time setup (see DEPLOY.md "Uptime monitoring"):
 #   Repo Settings -> Secrets and variables -> Actions -> New repository secret
-#     HEALTH_CHECK_URL          e.g. https://3-15-20-100.sslip.io/actuator/health
+#     HEALTH_CHECK_URL          e.g. https://3-15-20-100.sslip.io/api/v1/health
 #     MONITOR_TELEGRAM_BOT_TOKEN
 #     MONITOR_TELEGRAM_CHAT_ID
 #

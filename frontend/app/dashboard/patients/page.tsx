@@ -4,9 +4,12 @@ import React, { useEffect, useState, useMemo, Suspense } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Users, Search, Phone, Mail, X, UserCircle2, UserPlus, Stethoscope } from "lucide-react";
+import { Users, Search, Phone, Mail, X, UserCircle2, UserPlus, Stethoscope, CalendarPlus } from "lucide-react";
 import api from "../../../lib/api";
 import { SpotlightLink } from "../../../components/Spotlight";
+import NewBookingWizard from "../../../components/psyfos/NewBookingWizard";
+import CaseStatusChip from "../../../components/psyfos/CaseStatusChip";
+import { CASE_STATUS_OPTIONS } from "../../../lib/psyfos";
 
 type Patient = {
   // email/phone are genuinely optional on the server (only name is required
@@ -15,6 +18,7 @@ type Patient = {
   id: number; name: string; email?: string | null; phone?: string | null;
   riskFlag?: boolean; riskReason?: string; riskFlaggedAt?: string;
   assignedDoctorId?: number | null;
+  caseStatus?: string;
 };
 type Appointment = {
   id: number; patientId?: number | null; patientName: string; patientEmail: string;
@@ -48,6 +52,17 @@ function PatientsView() {
   // doctor picker/badge without a round-trip, and because staffDoctors
   // below only ever lists OTHER staff, never the caller's own row.
   const [ownUser, setOwnUser] = useState<StaffDoctor | null>(null);
+  // Psyfos: a therapist's list is "My Clients" (their own caseload) with a
+  // switch to the whole clinic roster; everyone else sees the full roster as before.
+  const [isTherapist, setIsTherapist] = useState(false);
+  const [identityReady, setIdentityReady] = useState(false);
+  const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [canBook, setCanBook] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // A receptionist/support login has no calendar of their own: it can never be
+  // the "treating doctor" of a client, so it is never offered as "Myself".
+  const [isPractitioner, setIsPractitioner] = useState(true);
 
   useEffect(() => {
     try {
@@ -55,8 +70,14 @@ function PatientsView() {
       if (user) {
         setIsClinicContext(!!user.tenantId || user.accountType === "CLINIC");
         setOwnUser({ id: user.id, name: user.name || user.username, jobTitle: user.jobTitle ?? null });
+        const practitioner = !user.tenantId || user.role === "ROLE_PSYCHOLOGIST";
+        setIsPractitioner(practitioner);
+        setIsTherapist(!!user.tenantId && user.role === "ROLE_PSYCHOLOGIST");
+        const perms: string[] = Array.isArray(user.permissions) ? user.permissions : [];
+        setCanBook(!user.tenantId || user.role === "ROLE_PSYCHOLOGIST" || perms.includes("APPOINTMENTS"));
       }
     } catch { /* default to hidden if we can't tell */ }
+    setIdentityReady(true);
   }, []);
 
   // Roster of bookable psychologists in this clinic, for the doctor picker
@@ -66,20 +87,23 @@ function PatientsView() {
   // empty and hidden, same as every other optional block on this page.
   const [staffDoctors, setStaffDoctors] = useState<StaffDoctor[]>([]);
   useEffect(() => {
-    api.get("/staff")
-      .then(r => setStaffDoctors((r.data ?? []).filter((s: any) => s.role === "ROLE_PSYCHOLOGIST" && s.enabled)))
+    api.get("/appointments/therapists")
+      .then(r => setStaffDoctors((r.data ?? []).map((t: any) => ({ id: t.id, name: t.name, jobTitle: t.jobTitle }))))
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
+  const loadAll = React.useCallback(() => {
+    if (!identityReady) return;
+    setLoading(true);
     Promise.all([
-      api.get("/patients"),
+      api.get(isTherapist && scope === "mine" ? "/me/clients" : "/patients"),
       api.get("/appointments"),
     ]).then(([pRes, aRes]) => {
       setPatients(pRes.data);
       setAppointments(aRes.data);
     }).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  }, [identityReady, isTherapist, scope]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const filtered = useMemo(() => {
     // Every field here is optional in practice — a patient added from the
@@ -89,13 +113,14 @@ function PatientsView() {
     // missing one (which blanked the whole page, not just that card).
     const q = search.trim().toLowerCase();
     const result = patients.filter(p =>
-      !q ||
-      p.name?.toLowerCase().includes(q) ||
-      p.email?.toLowerCase().includes(q) ||
-      p.phone?.toLowerCase().includes(q)
+      (statusFilter === "ALL" || (p.caseStatus ?? "NEW_CASE") === statusFilter) &&
+      (!q ||
+        p.name?.toLowerCase().includes(q) ||
+        p.email?.toLowerCase().includes(q) ||
+        p.phone?.toLowerCase().includes(q))
     );
     return result.sort((a, b) => (b.riskFlag ? 1 : 0) - (a.riskFlag ? 1 : 0));
-  }, [patients, search]);
+  }, [patients, search, statusFilter]);
 
   const getPatientStats = (patientId: number) => {
     const apts = appointments.filter(a => a.patientId === patientId);
@@ -135,7 +160,7 @@ function PatientsView() {
     // Defaults to the caller themselves in a clinic — always an explicit,
     // valid choice, never left ambiguous — but stays blank (no picker at
     // all) for a solo practitioner, who has no one else to assign to.
-    setForm({ ...EMPTY_FORM, doctorId: ownUser ? String(ownUser.id) : "" });
+    setForm({ ...EMPTY_FORM, doctorId: ownUser && isPractitioner ? String(ownUser.id) : "" });
     setFormError("");
     setShowModal(true);
   };
@@ -153,8 +178,7 @@ function PatientsView() {
         name: form.name, email: form.email, phone: form.phone,
         assignedDoctorId: form.doctorId ? Number(form.doctorId) : undefined,
       });
-      const pRes = await api.get("/patients");
-      setPatients(pRes.data);
+      loadAll();
       closeModal();
     } catch {
       setFormError("Failed to add patient. Please try again.");
@@ -212,8 +236,9 @@ function PatientsView() {
                     onChange={e => setForm(prev => ({ ...prev, doctorId: e.target.value }))}
                     style={{ borderRadius: 12 }}
                   >
-                    {ownUser && <option value={ownUser.id}>Myself{ownUser.jobTitle ? ` — ${ownUser.jobTitle}` : ""}</option>}
-                    {staffDoctors.map(d => (
+                    {!isPractitioner && <option value="">Not assigned yet</option>}
+                    {ownUser && isPractitioner && <option value={ownUser.id}>Myself{ownUser.jobTitle ? ` — ${ownUser.jobTitle}` : ""}</option>}
+                    {staffDoctors.filter(d => !(isPractitioner && ownUser && d.id === ownUser.id)).map(d => (
                       <option key={d.id} value={d.id}>{d.name}{d.jobTitle ? ` — ${d.jobTitle}` : ""}</option>
                     ))}
                   </select>
@@ -249,12 +274,36 @@ function PatientsView() {
             style={{ paddingLeft: 40 }}
           />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, flexWrap: "wrap" }}>
+          {isTherapist && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {([{ v: "mine" as const, label: "My clients" }, { v: "all" as const, label: "All clinic clients" }]).map(o => (
+                <button key={o.v} type="button" onClick={() => setScope(o.v)} className="tab-pill"
+                  style={{
+                    padding: "8px 14px", borderRadius: 50, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer",
+                    background: scope === o.v ? "var(--accent)" : "var(--glass)", color: scope === o.v ? "#fff" : "var(--text-2)",
+                  }}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <select className="nm-input no-icon" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 215 }} aria-label="Filter by session status">
+            <option value="ALL">All session statuses</option>
+            {CASE_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
           <div className="soft-card-2" style={{ borderRadius: 50, padding: "8px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <Users style={{ width: 14, height: 14, color: "var(--accent)" }} />
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-1)" }}>{filtered.length}</span>
-            <span style={{ fontSize: 12, color: "var(--text-3)" }}>patients</span>
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>{isTherapist && scope === "mine" ? "clients" : "patients"}</span>
           </div>
+          {canBook && (
+            <button onClick={() => setWizardOpen(true)} className="btn-nm"
+              style={{ padding: "9px 18px", fontSize: 13, fontWeight: 700 }}>
+              <CalendarPlus style={{ width: 14, height: 14, color: "var(--accent)" }} />
+              New Booking
+            </button>
+          )}
           <button onClick={openModal} className="btn-nm-accent"
             style={{ padding: "9px 18px", fontSize: 13 }}>
             <UserPlus style={{ width: 14, height: 14 }} />
@@ -285,8 +334,8 @@ function PatientsView() {
           {filtered.length === 0 && (
             <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "60px 0" }}>
               <UserCircle2 style={{ width: 48, height: 48, color: "var(--text-3)", margin: "0 auto 12px" }} />
-              <p style={{ color: "var(--text-2)", fontWeight: 600 }}>No patients found</p>
-              <p style={{ color: "var(--text-3)", fontSize: 13 }}>Try a different search</p>
+              <p style={{ color: "var(--text-2)", fontWeight: 600 }}>{isTherapist && scope === "mine" && patients.length === 0 ? "No clients on your caseload yet" : "No patients found"}</p>
+              <p style={{ color: "var(--text-3)", fontSize: 13 }}>{isTherapist && scope === "mine" && patients.length === 0 ? "Clients appear here once a session is booked with you." : "Try a different search"}</p>
             </div>
           )}
           {filtered.map((patient, i) => {
@@ -315,7 +364,10 @@ function PatientsView() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{patient.name}</h3>
-                    <p style={{ fontSize: 11, color: "var(--text-3)" }}>ID #{patient.id.toString().padStart(4, "0")}</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
+                      <p style={{ fontSize: 11, color: "var(--text-3)" }}>ID #{patient.id.toString().padStart(4, "0")}</p>
+                      <CaseStatusChip status={patient.caseStatus} size="sm" />
+                    </div>
                   </div>
                 </div>
 
@@ -360,6 +412,7 @@ function PatientsView() {
           })}
         </div>
       )}
+      {wizardOpen && <NewBookingWizard onClose={() => setWizardOpen(false)} onBooked={() => loadAll()} />}
     </div>
   );
 }

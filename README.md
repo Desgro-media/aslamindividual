@@ -4,6 +4,24 @@ A practice-management and booking platform for psychologists — solo practition
 
 This document is the single reference for how the product and codebase fit together: who it's for, how multi-tenancy and security work, every feature, the data model, the API surface, and how to run and deploy it.
 
+> **Architecture update — now a single Vercel app.** The REST API that used to be the Spring Boot service in
+> `backend/` is now part of the Next.js app: `frontend/server/` (services, security, SQL migrations in
+> `frontend/db/migrations/`) served by `frontend/app/api/v1/[...path]/route.ts`. Same endpoints, same JSON, same
+> roles/permissions, same database schema — so the existing screens work unchanged. Deploy with
+> [`DEPLOY.md`](DEPLOY.md). Wherever this README says "Spring"/"Java"/"JPA", read `frontend/server/` — the
+> `backend/` folder is kept only as a reference/rollback.
+
+## Psyfos workflow (therapist & receptionist)
+
+The clinic's required flow is built on top of the existing screens:
+
+**Receptionist:** enquiry (Leads / public booking page) → client details → service (Counselling · Therapy · Assessment · Career · Other) → therapist → date & time → payment / confirmation → *(session)* → follow-up → session status → Monthly / Management Report.
+Entry point: **Appointments → New Booking** (a 5-step wizard; also launched from a lead or a client's profile).
+
+**Therapist:** login → **Schedule** → today's appointments → client profile → **Case History** → conduct session → **Session Notes** → update **session status** → schedule next **Follow-up** → save. Nav: Schedule · My Clients · Case History · Session Notes · Follow-up · My Session Reports. "Complete session" does notes + status + follow-up in one atomic step (`POST /appointments/:id/complete`).
+
+**Session status** (per client): New Case · Ongoing · Periodic Follow-up · Terminated · Dropped — logged on every change (`case_status_log`). **Follow-ups** (`follow_up`): set a date, optionally book the session; PENDING → BOOKED → DONE. **Reports:** `/dashboard/reports` (clinic, ANALYTICS permission) and `/dashboard/my-reports` (a therapist's own numbers); both export CSV / print.
+
 ---
 
 ## Table of contents
