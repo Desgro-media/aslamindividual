@@ -3,13 +3,12 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // The REST API now lives inside this app (app/api/v1/[...path]) instead of a
+  // separate Spring Boot service, so there is no backend to proxy to any more.
   async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8087';
     return [
-      {
-        source: '/api/v1/:path*',
-        destination: `${backendUrl}/api/v1/:path*`,
-      },
+      // Keeps any uptime monitor that still pings the old Spring Actuator URL working.
+      { source: '/actuator/health', destination: '/api/v1/health' },
     ];
   },
 };

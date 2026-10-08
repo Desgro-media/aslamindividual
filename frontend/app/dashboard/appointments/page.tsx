@@ -6,11 +6,15 @@ import { useSearchParams } from "next/navigation";
 import {
   Check, X, Search, RefreshCw, Calendar, Clock,
   AlertCircle, Phone, Mail, FileText, Tag,
-  CheckCircle2, XCircle, Hourglass, Timer, Eye, PhoneCall, Video, MapPin
+  CheckCircle2, XCircle, Hourglass, Timer, Eye, PhoneCall, Video, MapPin, CalendarPlus, Stethoscope
 } from "lucide-react";
 import api from "../../../lib/api";
 import MonthFilter, { monthKey, monthLabel } from "../../../components/MonthFilter";
 import { SpotlightDiv } from "../../../components/Spotlight";
+import NewBookingWizard from "../../../components/psyfos/NewBookingWizard";
+import SessionWrapUpModal from "../../../components/psyfos/SessionWrapUpModal";
+import CaseStatusChip from "../../../components/psyfos/CaseStatusChip";
+import { useServiceNames } from "../../../components/psyfos/SessionBits";
 
 type Appointment = {
   id: number;
@@ -29,6 +33,9 @@ type Appointment = {
   notes?: string;
   paymentScreenshotBase64?: string;
   returningPatient?: boolean;
+  patientCaseStatus?: "NEW_CASE" | "ONGOING" | "PERIODIC_FOLLOW_UP" | "TERMINATED" | "DROPPED";
+  assignedDoctorId?: number;
+  assignedDoctorName?: string | null;
 };
 
 const STATUS_CFG: Record<string, { label: string; textColor: string; bgColor: string; icon: React.ReactNode }> = {
@@ -66,6 +73,11 @@ function AppointmentsView() {
   const [convertDialog, setConvertDialog] = useState<{ open: boolean; id: number | null; sessionType?: string }>({ open: false, id: null });
   const [convertForm, setConvertForm] = useState({ appointmentDate: "", startTime: "", sessionType: "", mode: "OFFLINE" as "ONLINE" | "OFFLINE" });
 
+  // Psyfos: the front-desk booking flow and the end-of-session wrap-up
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wrapUp, setWrapUp] = useState<Appointment | null>(null);
+  const serviceNameFor = useServiceNames();
+
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (text: string, type: "success" | "error") => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -86,7 +98,17 @@ function AppointmentsView() {
 
   useEffect(() => { 
     fetchAppointments(); 
-    api.get("/services").then(res => setServices(res.data)).catch(() => {});
+    // /services needs the Settings permission; a front-desk login without it
+    // reads the booking catalogue instead (same names, only what can be booked).
+    let canSettings = true;
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "null");
+      canSettings = !u?.tenantId || (Array.isArray(u?.permissions) && u.permissions.includes("SETTINGS"));
+    } catch { /* assume yes */ }
+    (canSettings ? api.get("/services") : api.get("/appointments/service-options")
+      .then(r => ({ data: (r.data ?? []).map((o: any) => ({ id: o.serviceId, name: o.name })) })))
+      .then(res => setServices(res.data))
+      .catch(() => {});
   }, [fetchAppointments]);
 
   const handleConfirm = async () => {
@@ -115,17 +137,6 @@ function AppointmentsView() {
 
   const openVerifyDialog = (apt: Appointment) => {
     setVerifyDialog({ open: true, id: apt.id, screenshotBase64: apt.paymentScreenshotBase64 });
-  };
-
-  const handleComplete = async (id: number) => {
-    setActionLoading(true);
-    try {
-      await api.patch(`/appointments/${id}?status=COMPLETED`);
-      showToast("Marked as completed!", "success");
-      if (selected?.id === id) setSelected(null);
-      await fetchAppointments();
-    } catch { showToast("Failed to update", "error"); }
-    setActionLoading(false);
   };
 
   const openCancelDialog = (id: number) => {
@@ -239,7 +250,7 @@ function AppointmentsView() {
     if (!sessionType) return "General";
     const svc = services.find(s => String(s.id) === sessionType);
     if (svc) return svc.name;
-    return sessionType.replace(/_/g, " ");
+    return serviceNameFor(sessionType);
   };
 
   // Missing/legacy mode defaults to OFFLINE, mirroring the backend's own
@@ -331,6 +342,14 @@ function AppointmentsView() {
             </button>
           )}
           <MonthFilter months={availableMonths} value={monthFilter} onChange={setMonthFilter} />
+          <button
+            onClick={() => setWizardOpen(true)}
+            className="btn-nm-accent"
+            style={{ padding: "10px 18px", borderRadius: 14, flexShrink: 0, gap: 8, fontWeight: 700 }}
+          >
+            <CalendarPlus style={{ width: 14, height: 14 }} />
+            New Booking
+          </button>
           <button
             onClick={fetchAppointments}
             className="btn-nm"
@@ -428,6 +447,9 @@ function AppointmentsView() {
                                 <RefreshCw style={{ width: 9, height: 9 }} /> Returning
                               </span>
                             )}
+                            {apt.status !== "DEMO_CALL_PENDING" && apt.patientCaseStatus && (
+                              <CaseStatusChip status={apt.patientCaseStatus} size="sm" />
+                            )}
                           </div>
                           <p style={{ fontSize: 11, color: "var(--text-3)" }}>{apt.patientEmail}</p>
                         </div>
@@ -440,15 +462,20 @@ function AppointmentsView() {
                           {getSessionName(apt.sessionType)}
                         </div>
                         {apt.status !== "DEMO_CALL_PENDING" && <ModeBadge mode={apt.mode} />}
+                        {apt.status !== "DEMO_CALL_PENDING" && apt.assignedDoctorName && (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--text-3)" }}>
+                            <Stethoscope style={{ width: 10, height: 10 }} /> {apt.assignedDoctorName}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
                       {apt.status !== "DEMO_CALL_PENDING" ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-1)" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-1)", whiteSpace: "nowrap" }}>
                             <Calendar style={{ width: 12, height: 12, color: "var(--accent)" }} /> {apt.appointmentDate}
                           </span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-3)" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-3)", whiteSpace: "nowrap" }}>
                             <Clock style={{ width: 12, height: 12 }} /> {apt.startTime}
                           </span>
                         </div>
@@ -551,10 +578,11 @@ function AppointmentsView() {
                         {apt.status === "CONFIRMED" && (
                           <>
                             <button
-                              onClick={() => handleComplete(apt.id)}
+                              onClick={() => setWrapUp(apt)}
                               disabled={actionLoading}
                               className="btn-nm"
                               style={{ padding: "6px 12px", borderRadius: 10, fontSize: 11, fontWeight: 600, color: "var(--accent)" }}
+                              title="Complete the session: notes, session status, next follow-up"
                             >
                               Complete
                             </button>
@@ -644,6 +672,9 @@ function AppointmentsView() {
                         <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)" }}>
                           Session {sessionNumbers[selected.id]}
                         </span>
+                      )}
+                      {selected.status !== "DEMO_CALL_PENDING" && selected.patientCaseStatus && (
+                        <CaseStatusChip status={selected.patientCaseStatus} size="sm" />
                       )}
                     </div>
                   </div>
@@ -762,7 +793,7 @@ function AppointmentsView() {
                 {selected.status === "CONFIRMED" && (
                   <button
                     disabled={actionLoading}
-                    onClick={() => handleComplete(selected.id)}
+                    onClick={() => setWrapUp(selected)}
                     className="btn-nm-accent"
                     style={{ flex: 1 }}
                   >
@@ -912,6 +943,30 @@ function AppointmentsView() {
           </div>
         </div>,
         document.body
+      )}
+
+      {wizardOpen && (
+        <NewBookingWizard onClose={() => setWizardOpen(false)} onBooked={() => fetchAppointments()} />
+      )}
+
+      {wrapUp && (
+        <SessionWrapUpModal
+          appointment={{
+            id: wrapUp.id, patientId: wrapUp.patientId ?? 0, patientName: wrapUp.patientName,
+            assignedDoctorId: wrapUp.assignedDoctorId ?? 0, appointmentDate: wrapUp.appointmentDate,
+            startTime: wrapUp.startTime, endTime: wrapUp.endTime, mode: wrapUp.mode, patientCaseStatus: wrapUp.patientCaseStatus,
+          }}
+          onClose={() => setWrapUp(null)}
+          onDone={(res) => {
+            setWrapUp(null);
+            setSelected(null);
+            const bits = ["Session completed"];
+            if (res?.caseStatusChanged) bits.push("status updated");
+            if (res?.followUp) bits.push(res.followUp.status === "BOOKED" ? "follow-up booked" : "follow-up set");
+            showToast(bits.join(" · "), "success");
+            fetchAppointments();
+          }}
+        />
       )}
 
       {/* Verify Dialog */}

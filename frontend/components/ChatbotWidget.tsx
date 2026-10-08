@@ -47,7 +47,7 @@ export default function ChatbotWidget() {
     setMessages(prev => [...prev, { id: Date.now().toString(), text: userMessage, isBot: false }]);
     setLoading(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8086/api/v1";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
       const res    = await fetch(`${apiUrl}/chat`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },

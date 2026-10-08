@@ -1,3 +1,6 @@
 # Docker/production secrets — never commit real credentials
 .env
 .env.prod
+
+# JVM crash dumps
+hs_err_pid*.log

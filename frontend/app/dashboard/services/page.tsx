@@ -40,6 +40,7 @@ interface Service {
   duration: string;
   icon: string;
   fee: number | string;
+  category?: string;
   active: boolean;
   displayOrder: number;
   createdAt?: string;
@@ -51,6 +52,7 @@ const emptyForm = (): Omit<Service, "id" | "createdAt"> => ({
   duration: "50 min",
   fee: 0,
   icon: "Sparkles",
+  category: "OTHER",
   active: true,
   displayOrder: 0,
 });
@@ -140,6 +142,7 @@ export default function ServicesPage() {
       duration: svc.duration,
       fee: svc.fee || 0,
       icon: svc.icon,
+      category: svc.category || "OTHER",
       active: svc.active,
       displayOrder: svc.displayOrder,
     });
@@ -340,6 +343,9 @@ export default function ServicesPage() {
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 6 }}>
                     <Clock style={{ width: 11, height: 11, color: "var(--text-3)" }} />
                     <span style={{ fontSize: 11, color: "var(--text-3)" }}>{svc.duration}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--accent)", marginLeft: 6 }}>
+                      {({ COUNSELLING: "Counselling", THERAPY: "Therapy", ASSESSMENT: "Assessment", CAREER: "Career" } as Record<string, string>)[svc.category || "OTHER"] ?? "Other"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -466,6 +472,30 @@ export default function ServicesPage() {
                   rows={3}
                   className="nm-textarea"
                 />
+              </div>
+
+              {/* Category — how services are grouped when booking (Counselling / Therapy / Assessment / Career) */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 8 }}>
+                  Category
+                </label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[["COUNSELLING", "Counselling"], ["THERAPY", "Therapy"], ["ASSESSMENT", "Assessment"], ["CAREER", "Career"], ["OTHER", "Other"]].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, category: value }))}
+                      className={form.category === value ? "" : "soft-card-2 card-hover"}
+                      style={{
+                        padding: "8px 16px", borderRadius: 50, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                        background: form.category === value ? "var(--accent)" : undefined,
+                        color: form.category === value ? "#fff" : "var(--text-2)",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Duration + Order */}

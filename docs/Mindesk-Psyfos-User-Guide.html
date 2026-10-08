@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mindesk (Psyfos) User Guide</title>
+<style>
+  @page { size: A4; margin: 15mm 14mm 17mm 14mm; }
+  :root {
+    --ink: #1b1d3a; --muted: #5d6285; --line: #e3e6f5; --brand: #4f6bff; --brand-dark: #3a4fd6;
+    --soft: #f4f6ff; --green: #0f9d6b; --amber: #c27803; --red: #d6335a;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); font-size: 11.2pt; line-height: 1.55; background: #fff; }
+  .wrap { max-width: 182mm; margin: 0 auto; }
+
+  /* ---------- cover ---------- */
+  .cover { height: 262mm; display: flex; flex-direction: column; justify-content: space-between; padding: 22mm 16mm 14mm; color: #fff; border-radius: 6mm;
+           background: radial-gradient(1200px 600px at 80% -10%, #7c8cff 0%, transparent 60%), linear-gradient(160deg, #1b1f55 0%, #3a3fb5 55%, #5d6bff 100%); page-break-after: always; }
+  .cover .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18pt; letter-spacing: .3px; }
+  .cover .logo i { width: 38px; height: 38px; border-radius: 11px; background: rgba(255,255,255,.18); display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 18pt; }
+  .cover h1 { page-break-before: auto; font-size: 38pt; line-height: 1.1; margin: 0 0 10px; font-weight: 800; border: 0; padding: 0; color: #fff; }
+  .cover p.sub { font-size: 14pt; margin: 0; opacity: .92; max-width: 135mm; }
+  .cover .who { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12mm; }
+  .cover .who span { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); border-radius: 10px; padding: 9px 12px; font-size: 10.5pt; }
+  .cover .foot { font-size: 10pt; opacity: .8; }
+
+  /* ---------- headings ---------- */
+  h1 { font-size: 22pt; margin: 0 0 6px; padding-bottom: 8px; border-bottom: 3px solid var(--brand); color: var(--ink); page-break-before: always; }
+  h1.first { page-break-before: auto; }
+  h1 small { display: block; font-size: 10pt; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--brand); margin-bottom: 2px; }
+  h2 { font-size: 15pt; margin: 22px 0 6px; color: var(--brand-dark); page-break-after: avoid; }
+  h3 { font-size: 12pt; margin: 16px 0 4px; page-break-after: avoid; }
+  p { margin: 6px 0 9px; }
+  ul, ol { margin: 6px 0 10px; padding-left: 22px; }
+  li { margin: 3px 0; }
+  a { color: var(--brand-dark); text-decoration: none; }
+  code, .k { font-family: Consolas, "Courier New", monospace; background: #eef0fb; padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+  .lead { font-size: 12.5pt; color: var(--muted); }
+
+  /* ---------- contents ---------- */
+  .toc { columns: 2; column-gap: 12mm; margin-top: 6mm; }
+  .toc div { break-inside: avoid; margin-bottom: 10px; }
+  .toc b { display: block; color: var(--brand-dark); }
+  .toc a { display: block; color: var(--ink); padding: 1px 0 1px 10px; font-size: 10.5pt; }
+
+  /* ---------- figures ---------- */
+  figure { margin: 10px 0 14px; break-inside: avoid; }
+  figure img { width: 90%; margin: 0 auto; display: block; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 10px rgba(30,40,120,.08); }
+  figure.narrow img { width: 70%; margin: 0 auto; }
+  figure.m img { width: calc(var(--px, 600) * 0.2mm); max-width: 100%; margin: 0 auto; }
+  .pair figure img, .pair figure.m img { width: 100%; }
+  figcaption { font-size: 9.5pt; color: var(--muted); margin-top: 5px; text-align: center; }
+  figcaption b { color: var(--ink); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; break-inside: avoid; }
+  .pair figure { margin: 6px 0 10px; }
+
+  /* ---------- callouts ---------- */
+  .box { border-radius: 10px; padding: 9px 13px; margin: 10px 0; break-inside: avoid; border-left: 5px solid; font-size: 10.6pt; }
+  .box b.t { display: block; margin-bottom: 2px; }
+  .note { background: #eef2ff; border-color: var(--brand); }
+  .tip  { background: #e9f8f1; border-color: var(--green); }
+  .warn { background: #fff5e0; border-color: #f0a30a; }
+  .stop { background: #fdebf0; border-color: var(--red); }
+  .box p { margin: 3px 0; }
+
+  /* ---------- steps ---------- */
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 8px 0 12px; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 4px 0 4px 38px; margin: 5px 0; break-inside: avoid; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 10.5pt; display: flex; align-items: center; justify-content: center; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 10.2pt; }
+  th { text-align: left; background: var(--soft); color: var(--brand-dark); padding: 7px 9px; border-bottom: 2px solid var(--line); }
+  td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr { break-inside: avoid; }
+  table.fix td:first-child { width: 31%; font-weight: 600; }
+  table.fix td:nth-child(2) { width: 25%; color: var(--muted); }
+  .grp { background: var(--brand); color: #fff; padding: 6px 12px; border-radius: 8px; font-weight: 700; margin: 18px 0 4px; break-after: avoid; }
+
+  /* ---------- status chips ---------- */
+  .chip { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 9.5pt; font-weight: 700; border: 1px solid; white-space: nowrap; }
+  .c-new { background: #eaefff; color: #3a55e0; border-color: #c5d0ff; }
+  .c-ong { background: #e3f8ef; color: #0f8a5e; border-color: #aee8d0; }
+  .c-per { background: #def5f8; color: #0d6e80; border-color: #a9e0e8; }
+  .c-ter { background: #eceef5; color: #4a4f6e; border-color: #cfd3e6; }
+  .c-drp { background: #fde8ee; color: #c42c52; border-color: #f6bccb; }
+
+  /* ---------- journey diagram ---------- */
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
+  .flow .n { background: var(--soft); border: 1.5px solid #cdd5ff; border-radius: 10px; padding: 7px 11px; font-weight: 600; font-size: 10pt; text-align: center; }
+  .flow .n small { display: block; font-weight: 400; color: var(--muted); font-size: 8.5pt; }
+  .flow .a { color: var(--brand); font-weight: 700; }
+  .rolebar { display: inline-block; font-size: 9pt; font-weight: 700; padding: 1px 9px; border-radius: 999px; background: var(--brand); color: #fff; vertical-align: middle; }
+  .rolebar.t { background: var(--green); } .rolebar.o { background: #8a5cf6; } .rolebar.a { background: var(--red); } .rolebar.c { background: #64748b; }
+  .check { list-style: none; padding-left: 0; }
+  .check li { padding-left: 26px; position: relative; }
+  .check li::before { content: "\2610"; position: absolute; left: 0; color: var(--brand); font-size: 13pt; line-height: 1.2; }
+  .small { font-size: 9.5pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- ============================== COVER ============================== -->
+<div class="cover">
+  <div class="logo"><i>&#9829;</i> Mindesk &middot; Psyfos</div>
+  <div>
+    <h1>User Guide</h1>
+    <p class="sub">A simple, step-by-step manual for the whole clinic team &mdash; how to book, treat, follow up, and report, with pictures from the real software.</p>
+    <div class="who">
+      <span><b>Receptionists</b><br>Bookings, payments, follow-ups</span>
+      <span><b>Therapists</b><br>Schedule, sessions, notes</span>
+      <span><b>Clinic owners</b><br>Services, staff, settings</span>
+      <span><b>Platform admins</b><br>Clinics &amp; subscriptions</span>
+    </div>
+  </div>
+  <div class="foot">Version: October 2026 &nbsp;&middot;&nbsp; Written in plain English &nbsp;&middot;&nbsp; No technical knowledge needed</div>
+</div>
+
+<div class="wrap">
+
+<!-- ============================== CONTENTS ============================== -->
+<h1 class="first"><small>Before you begin</small>Contents</h1>
+<p class="lead">You do not have to read everything. Go to the part that matches your job. Part 1 and Part 2 are worth reading once by everyone.</p>
+<div class="toc">
+  <div><b>Part 1 &middot; Start here</b>
+    <a href="#p1">What is this software?</a><a href="#p1-roles">Who uses it</a><a href="#p1-login">How to log in</a><a href="#p1-around">Finding your way around</a><a href="#p1-words">Simple word list</a></div>
+  <div><b>Part 2 &middot; How a client moves through the clinic</b>
+    <a href="#p2">The journey, step by step</a><a href="#p2-status">The 5 session statuses</a><a href="#p2-follow">Follow-ups explained</a></div>
+  <div><b>Part 3 &middot; Receptionist guide</b>
+    <a href="#p3">Overview &amp; Appointments</a><a href="#p3-wiz">New Booking (5 steps)</a><a href="#p3-pay">Pending Payments</a><a href="#p3-fu">Follow-ups</a><a href="#p3-more">Leads, Patients, Billing, Report</a></div>
+  <div><b>Part 4 &middot; Therapist guide</b>
+    <a href="#p4">Schedule</a><a href="#p4-done">Complete a session</a><a href="#p4-clients">My Clients &amp; profile</a><a href="#p4-ch">Case History, Notes, Follow-up</a><a href="#p4-rep">My Session Reports</a></div>
+  <div><b>Part 5 &middot; Clinic owner guide</b>
+    <a href="#p5">Overview &amp; Analytics</a><a href="#p5-svc">Services</a><a href="#p5-staff">Staff, pricing &amp; access</a><a href="#p5-set">Settings &amp; Subscription</a></div>
+  <div><b>Part 6 &middot; Clients &amp; platform admin</b>
+    <a href="#p6">Public booking page</a><a href="#p6-track">Client tracking page</a><a href="#p7">Platform admin</a></div>
+  <div><b>Part 8 &middot; Problems &amp; fixes</b>
+    <a href="#p8">Common problems and how to fix them</a></div>
+  <div><b>Part 9 &middot; Good habits &amp; checklists</b>
+    <a href="#p9">Privacy, daily checklists, test logins</a></div>
+</div>
+
+<div class="box note"><b class="t">How to read the colour boxes</b>
+  <p><b>Blue</b> = good to know. &nbsp; <b>Green</b> = a time-saving tip. &nbsp; <b>Yellow</b> = be careful. &nbsp; <b>Red</b> = something that can cause real trouble.</p></div>
+
+<!-- ============================== PART 1 ============================== -->
+<h1 id="p1"><small>Part 1</small>Start here</h1>
+
+<h2>1.1 What is this software?</h2>
+<p>Mindesk (also called <b>Psyfos</b>) is the program your clinic uses to run the day. It keeps everything in one place:</p>
+<ul>
+  <li><b>Bookings</b> &mdash; who is coming, to which therapist, at what time.</li>
+  <li><b>Money</b> &mdash; what a session costs, what was paid, what is still due.</li>
+  <li><b>Client records</b> &mdash; each client&rsquo;s history, notes after every session, and how their case is going.</li>
+  <li><b>Follow-ups</b> &mdash; reminders that a client should come back, so nobody is forgotten.</li>
+  <li><b>Reports</b> &mdash; a monthly picture of the whole clinic, and one for each therapist.</li>
+</ul>
+<p>You open it in a web browser (Chrome or Edge works best), on a computer, tablet or phone. You do <b>not</b> install anything.</p>
+
+<h2 id="p1-roles">1.2 Who uses it?</h2>
+<p>Every person has their own login. What you see on the screen depends on your <b>role</b>.</p>
+<table>
+  <tr><th style="width:24%">Role</th><th>What this person does</th><th style="width:30%">Main screens</th></tr>
+  <tr><td><span class="rolebar">Receptionist</span></td><td>Takes enquiries, books sessions, collects payments, books follow-up sessions, watches the monthly report.</td><td>Overview, Appointments, Follow-ups, Patients, Leads, Billing, Pending Payments, Monthly Report</td></tr>
+  <tr><td><span class="rolebar t">Therapist</span></td><td>Sees today&rsquo;s sessions, runs the session, writes notes, updates the client&rsquo;s status, sets the next follow-up.</td><td>Schedule, My Clients, Case History, Session Notes, Follow-up, My Session Reports</td></tr>
+  <tr><td><span class="rolebar o">Clinic owner</span></td><td>Sets up services and prices, adds staff and decides what each person can open, manages the plan (subscription). Can do everything a receptionist can.</td><td>Everything, plus Services, Staff, Settings, Subscription</td></tr>
+  <tr><td><span class="rolebar a">Platform admin</span></td><td>Looks after all the clinics on the platform: approves subscription payments, suspends or helps a clinic. Does not see client records.</td><td>The separate <span class="k">/admin</span> page</td></tr>
+  <tr><td><span class="rolebar c">Client</span></td><td>Has <b>no login</b>. Books through the clinic&rsquo;s public booking page and follows the booking with a private link.</td><td>Booking page, tracking page</td></tr>
+</table>
+
+<h2 id="p1-login">1.3 How to log in</h2>
+<ol class="steps">
+  <li>Open the clinic&rsquo;s website address in your browser and go to the <b>Login</b> page.</li>
+  <li>Type your <b>email</b> and <b>password</b> (the clinic owner gives these to you).</li>
+  <li>Click <b>Sign In</b>. You land on your own home screen: therapists see <b>Schedule</b>; everyone else sees <b>Overview</b>.</li>
+</ol>
+<figure class="narrow"><img src="guide-images/01-login.png" alt="Login page"><figcaption><b>The login page.</b> Same page for receptionists, therapists and owners. The platform admin uses <span class="k">/admin</span>.</figcaption></figure>
+<div class="warn box"><b class="t">Keep your password private</b><p>Never share it, even with a colleague. If someone needs access, the owner can create a login for them in <b>Staff</b>. If you forget your password, ask the clinic owner to reset it (see Part 8).</p></div>
+
+<h2 id="p1-around">1.4 Finding your way around</h2>
+<p>Every screen has the same frame, so once you learn it, you know all of it.</p>
+<figure><img src="guide-images/10-reception-home.png" alt="Overview screen with sidebar"><figcaption><b>The frame.</b> Left: the <b>menu</b> (what you can open depends on your role). Top: the page name, a <b>search box</b>, the <b>light/dark switch</b>, the <b>bell</b> (items that need attention) and your <b>profile circle</b>. Bottom-right: the round <b>chat bubble</b> &mdash; a help assistant you can ask &ldquo;how do I&hellip;?&rdquo;.</figcaption></figure>
+<ul>
+  <li><b>Menu is shorter than you expect?</b> That is normal. Each person only sees what they are allowed to use.</li>
+  <li><b>Log out</b> with the small arrow icon at the bottom of the menu, especially on shared computers.</li>
+  <li><b>Coloured chips</b> next to a client&rsquo;s name show their case status (see Part 2).</li>
+</ul>
+
+<h2 id="p1-words">1.5 Simple word list</h2>
+<table>
+  <tr><th style="width:24%">Word</th><th>What it means here</th></tr>
+  <tr><td>Client / Patient</td><td>The person who comes for help. The two words mean the same thing in the software.</td></tr>
+  <tr><td>Session / Appointment</td><td>One meeting between a client and a therapist, at a set date and time.</td></tr>
+  <tr><td>Service</td><td>The <i>kind</i> of session: Counselling, Therapy, Assessment, Career, or Other.</td></tr>
+  <tr><td>Therapist</td><td>The psychologist or counsellor who runs the session.</td></tr>
+  <tr><td>Session status</td><td>Where the client&rsquo;s <i>case</i> stands: New Case, Ongoing, Periodic Follow-up, Terminated, or Dropped.</td></tr>
+  <tr><td>Follow-up</td><td>A reminder that this client should come back by a certain date.</td></tr>
+  <tr><td>Session notes (SOAP)</td><td>The therapist&rsquo;s write-up: <b>S</b>ubjective (what the client said), <b>O</b>bjective (what you saw), <b>A</b>ssessment (your view), <b>P</b>lan (next steps).</td></tr>
+  <tr><td>Pending payment</td><td>A confirmed session where money is still to be collected at the front desk.</td></tr>
+  <tr><td>Lead</td><td>Someone who showed interest (for example, through the booking page) but has not booked yet.</td></tr>
+  <tr><td>Tracking link</td><td>A private web link the client uses to check their booking. No login needed.</td></tr>
+</table>
+
+<!-- ============================== PART 2 ============================== -->
+<h1 id="p2"><small>Part 2</small>How a client moves through the clinic</h1>
+<p class="lead">This is the &ldquo;big picture&rdquo;. The software follows the same path your clinic already follows. Each screen in this guide is one box in the picture below.</p>
+
+<h2>2.1 The journey, step by step</h2>
+<div class="flow">
+  <div class="n">Enquiry<small>call, walk-in, web</small></div><span class="a">&rarr;</span>
+  <div class="n">Client details<small>name &amp; phone</small></div><span class="a">&rarr;</span>
+  <div class="n">Choose service<small>e.g. Therapy</small></div><span class="a">&rarr;</span>
+  <div class="n">Choose therapist</div><span class="a">&rarr;</span>
+  <div class="n">Pick date &amp; time</div><span class="a">&rarr;</span>
+  <div class="n">Payment<small>or confirm</small></div>
+</div>
+<p style="text-align:center;margin:0"><span class="rolebar">Receptionist does this part</span></p>
+<div class="flow" style="margin-top:12px">
+  <div class="n">Session happens</div><span class="a">&rarr;</span>
+  <div class="n">Notes<small>SOAP</small></div><span class="a">&rarr;</span>
+  <div class="n">Update status<small>5 choices</small></div><span class="a">&rarr;</span>
+  <div class="n">Set next follow-up<small>date</small></div><span class="a">&rarr;</span>
+  <div class="n">Follow-up session<small>booked by front desk</small></div><span class="a">&rarr;</span>
+  <div class="n">Monthly report</div>
+</div>
+<p style="text-align:center;margin:0"><span class="rolebar t">Therapist does the middle</span> &nbsp; <span class="rolebar">Receptionist books the follow-up</span> &nbsp; <span class="rolebar o">Owner reads the report</span></p>
+
+<div class="tip box"><b class="t">The idea in one sentence</b><p>The front desk <b>books</b> and <b>collects money</b>; the therapist <b>treats</b>, <b>writes notes</b> and <b>says when the client should return</b>; the front desk then <b>books that return visit</b>.</p></div>
+
+<h2 id="p2-status">2.2 The five session statuses</h2>
+<p>Every client always has exactly <b>one</b> status. It shows how their case is going. The therapist sets it when completing a session, and can change it at any time from the client&rsquo;s profile. Every change is saved in a history, so you can always see who changed it and when.</p>
+<table>
+  <tr><th style="width:21%">Status</th><th>Use it when&hellip;</th><th style="width:30%">What happens next</th></tr>
+  <tr><td><span class="chip c-new">New Case</span></td><td>The client is new and treatment has only just started.</td><td>Usually changes to Ongoing after a few sessions.</td></tr>
+  <tr><td><span class="chip c-ong">Ongoing</span></td><td>Regular sessions are in progress.</td><td>Stays until the client improves or leaves.</td></tr>
+  <tr><td><span class="chip c-per">Periodic Follow-up</span></td><td>Regular treatment is finished, but the client comes for occasional check-ins (for example monthly).</td><td>A follow-up date keeps appearing.</td></tr>
+  <tr><td><span class="chip c-ter">Terminated</span></td><td>Treatment ended properly, by agreement.</td><td>Case is closed. Waiting follow-ups are cancelled automatically.</td></tr>
+  <tr><td><span class="chip c-drp">Dropped</span></td><td>The client stopped coming without finishing.</td><td>Case is closed. Waiting follow-ups are cancelled automatically.</td></tr>
+</table>
+<div class="note box"><b class="t">Changing your mind is fine</b><p>If a Terminated or Dropped client comes back, just set the status again to <b>New Case</b> or <b>Ongoing</b> and set a new follow-up. Nothing is lost.</p></div>
+
+<h2 id="p2-follow">2.3 Follow-ups explained</h2>
+<p>A follow-up is a promise to bring a client back. It is created by the <b>therapist</b> (usually when completing a session) and handled by the <b>front desk</b>.</p>
+<div class="flow">
+  <div class="n">Pending<small>date set, no time yet</small></div><span class="a">&rarr;</span>
+  <div class="n">Booked<small>front desk gave a time</small></div><span class="a">&rarr;</span>
+  <div class="n">Done<small>the session took place</small></div>
+</div>
+<p class="small" style="margin-top:0">A follow-up can also become <b>Cancelled</b> (for example when a case is closed or the client no longer needs it).</p>
+<ul>
+  <li>A client can have <b>only one open follow-up</b> at a time. This stops double reminders.</li>
+  <li>If the due date passes and nobody booked it, it turns <b>Overdue</b> (shown in red) so the front desk sees it first.</li>
+  <li>If the therapist already chose a time, the follow-up is booked straight away and goes into the calendar.</li>
+</ul>
+
+<!-- ============================== PART 3 ============================== -->
+<h1 id="p3"><small>Part 3 &middot; For receptionists</small>Receptionist guide</h1>
+<p class="lead">Your job: make sure every client is booked, paid, and brought back when the therapist says so.</p>
+
+<h2>3.1 Overview &mdash; your starting screen</h2>
+<p>The Overview shows how the clinic is doing right now. You do not have to do anything here; it is a quick look.</p>
+<figure><img src="guide-images/10-reception-home.png" alt="Overview"><figcaption><b>Overview.</b> The big card is the <b>Booking Trend</b> for the last 14 days. On the right: total clients and bookings <b>waiting for payment</b>. Below: Completion Rate, Payments Cleared and Patient Retention. Scroll down for <b>Upcoming appointments</b>.</figcaption></figure>
+
+<h2>3.2 Appointments &mdash; every booking in one list</h2>
+<figure><img src="guide-images/11-appointments.png" alt="Appointments list"><figcaption><b>Appointments.</b> Use the tabs at the top to filter: <b>All, Demo Call, Pending, Awaiting Payment, Verifying Payment, Confirmed, Completed, Cancelled</b>. Search by name or email. Each row shows the client, their status chip, the service, mode (in-person / online), the therapist, date, time and length.</figcaption></figure>
+<table>
+  <tr><th style="width:26%">Tab</th><th>Meaning</th></tr>
+  <tr><td>Pending</td><td>A client asked for a time, and the clinic has not accepted it yet.</td></tr>
+  <tr><td>Awaiting Payment</td><td>A payment link was sent. The booking is held until the client pays.</td></tr>
+  <tr><td>Verifying Payment</td><td>The client says they paid (sent a screenshot). A staff member must check it.</td></tr>
+  <tr><td>Confirmed</td><td>The booking is firm. The therapist will see it on the Schedule.</td></tr>
+  <tr><td>Completed</td><td>The session has taken place and the therapist finished it.</td></tr>
+  <tr><td>Cancelled</td><td>The session will not happen.</td></tr>
+</table>
+
+<h2 id="p3-wiz">3.3 New Booking &mdash; the 5-step wizard</h2>
+<p>Use this whenever a client calls, walks in, or messages you. Click the blue <b>New Booking</b> button on the Appointments page (or in Patients, or on a lead). A window opens and walks you through <b>five steps</b>. A green tick shows each finished step.</p>
+
+<h3>Step 1 &mdash; Client</h3>
+<ol class="steps">
+  <li>Type the client&rsquo;s <b>phone number</b>. The software looks for an existing client.</li>
+  <li>If the client is found, their details fill in. <b>Use that record</b> &mdash; do not create a second one.</li>
+  <li>If not found, type their <b>name</b> (email is optional). Click <b>Continue</b>.</li>
+</ol>
+<figure class="m"><img style="--px:600" src="guide-images/m-12-wizard-1-client.png" alt="Wizard step 1"><figcaption><b>Step 1 &mdash; Client.</b> The phone number is the key. Searching by phone prevents duplicate clients.</figcaption></figure>
+
+<h3>Step 2 &mdash; Service</h3>
+<p>Choose what the client needs. Services are grouped as <b>Counselling, Therapy, Assessment, Career, Other</b>. Tap one, then <b>Continue</b>.</p>
+<figure class="m"><img style="--px:600" src="guide-images/m-13-wizard-2-service.png" alt="Wizard step 2"><figcaption><b>Step 2 &mdash; Service.</b> Only services that a therapist actually offers (with a price) can be chosen.</figcaption></figure>
+
+<h3>Step 3 &mdash; Therapist</h3>
+<p>Pick the therapist. Only therapists who offer the chosen service are listed. <b>A receptionist must always choose a therapist</b> &mdash; you do not have your own calendar.</p>
+<figure class="m"><img style="--px:600" src="guide-images/m-14-wizard-3-therapist.png" alt="Wizard step 3"><figcaption><b>Step 3 &mdash; Therapist.</b> Choose who will see the client.</figcaption></figure>
+
+<h3>Step 4 &mdash; Date &amp; time</h3>
+<ol class="steps">
+  <li>Choose <b>In-person</b> or <b>Online</b>.</li>
+  <li>Check the <b>session length</b> (it fills in from the service; change it only if the therapist asks).</li>
+  <li>Pick the <b>date</b>. The free times for that therapist appear as buttons.</li>
+  <li>Click a time (it turns blue), then <b>Continue</b>.</li>
+</ol>
+<figure class="m"><img style="--px:600" src="guide-images/m-15-wizard-4-datetime.png" alt="Wizard step 4"><figcaption><b>Step 4 &mdash; Date &amp; time.</b> Only <i>free</i> times are shown. Taken times, leave days and hours outside the therapist&rsquo;s timetable never appear.</figcaption></figure>
+
+<h3>Step 5 &mdash; Payment</h3>
+<p>Check the summary card (client, service, therapist, when, mode, fee). Then choose how money will be handled:</p>
+<table>
+  <tr><th style="width:30%">Choice</th><th>What happens</th></tr>
+  <tr><td>Collect at the front desk</td><td>Session is confirmed <b>now</b>. The amount due appears in <b>Pending Payments</b> for you to collect later.</td></tr>
+  <tr><td>Client is paying now</td><td>You record the money received (amount and method) as part of the booking.</td></tr>
+  <tr><td>Send the client a payment link</td><td>Booking is held as &ldquo;Awaiting Payment&rdquo; until the client pays online.</td></tr>
+</table>
+<figure class="m"><img style="--px:620" src="guide-images/m-16-wizard-5-payment.png" alt="Wizard step 5"><figcaption><b>Step 5 &mdash; Payment.</b> Click <b>Confirm booking</b> to finish. You can go <b>Back</b> to fix any step.</figcaption></figure>
+<figure class="m"><img style="--px:450" src="guide-images/m-17-wizard-done.png" alt="Booking done"><figcaption><b>Done.</b> The booking is saved. Click <b>Done</b> to close the window. The client can be sent their tracking link.</figcaption></figure>
+<div class="tip box"><b class="t">Time saver</b><p>On the <b>Patients</b> page, the <b>New Booking</b> button already knows the client. On the <b>Leads</b> page, <b>Book session</b> starts the wizard for that lead.</p></div>
+
+<h2 id="p3-pay">3.4 Pending Payments &mdash; collecting the money</h2>
+<p>This is your &ldquo;money to collect&rdquo; list. It holds every confirmed session where money is still due.</p>
+<figure><img src="guide-images/18-pending-payments.png" alt="Pending payments"><figcaption><b>Pending Payments.</b> Grouped into <b>Overdue</b> (red, session date passed), <b>Today</b> and <b>Upcoming</b>. Each line shows the client, session date, the amount due and a <b>Collect Payment</b> button. <b>History</b> shows earlier payments on that session.</figcaption></figure>
+<ol class="steps">
+  <li>Find the client and click <b>Collect Payment</b>.</li>
+  <li>The <b>amount</b> already shows the full balance. For a part-payment, type a smaller number &mdash; the rest stays in the list.</li>
+  <li>Choose the <b>method</b>: Cash, Card, UPI, Bank Transfer or Insurance.</li>
+  <li>Add a short <b>remark</b> if useful (for example &ldquo;first instalment&rdquo;). Click <b>Confirm</b>.</li>
+</ol>
+<figure class="m"><img style="--px:400" src="guide-images/m-19-collect-payment.png" alt="Collect payment window"><figcaption><b>Collect Payment.</b> The amount cannot be <i>more</i> than what is due.</figcaption></figure>
+<div class="warn box"><b class="t">Be careful</b><p>Always pick the true method (Cash vs UPI). The owner uses this to match the day&rsquo;s cash with the money in the drawer and the bank.</p></div>
+
+<h2 id="p3-fu">3.5 Follow-ups &mdash; bringing clients back</h2>
+<p>When a therapist says &ldquo;see this client again around 15 October&rdquo;, it lands here. Your job is to give it a real time.</p>
+<figure><img src="guide-images/20-follow-ups.png" alt="Follow-ups"><figcaption><b>Follow-ups.</b> The four boxes count <b>Overdue, Due today, Upcoming</b> and <b>Booked</b>. Tabs: <b>Needs scheduling</b> (your to-do list), <b>Booked</b>, and <b>History</b>. Each row shows the client&rsquo;s status chip, the therapist, the due date and the therapist&rsquo;s note. Icons on the right: &#9998; edit, &#10003; mark done, &#10005; cancel.</figcaption></figure>
+<ol class="steps">
+  <li>Open the <b>Needs scheduling</b> tab. Start with the red <b>Overdue</b> rows.</li>
+  <li>Call or message the client to agree a time.</li>
+  <li>Click <b>Book session</b>, pick the date, mode and time, and choose how payment is handled.</li>
+  <li>Click <b>Book session</b> again. The follow-up moves to the <b>Booked</b> tab and a normal appointment is created.</li>
+</ol>
+<figure class="m"><img style="--px:440" src="guide-images/m-21-book-follow-up.png" alt="Book follow-up window"><figcaption><b>Book follow-up session.</b> The therapist&rsquo;s note (&ldquo;Monthly check-in&rdquo;) is shown at the top so you know why the client is coming back.</figcaption></figure>
+<p>Need to add a reminder yourself? Use <b>Add follow-up</b> at the top right.</p>
+
+<h2 id="p3-more">3.6 Leads, Patients, Billing and Monthly Report</h2>
+<h3>Leads</h3>
+<p>A lead is someone who showed interest but has not booked. Call them, then click <b>Book session</b> to turn them into a client with a booking.</p>
+<figure><img src="guide-images/22-leads.png" alt="Leads"><figcaption><b>Leads.</b> The counters show how many leads exist and how many are <b>uncontacted</b>.</figcaption></figure>
+
+<h3>Patients</h3>
+<p>All the clinic&rsquo;s clients with their status chip. Filter by status, search by name, open a profile, or start a booking.</p>
+<figure><img src="guide-images/23-patients.png" alt="Patients"><figcaption><b>Patients.</b> Everyone registered at the clinic.</figcaption></figure>
+
+<h3>Billing</h3>
+<p>Every invoice, with filters <b>ALL / UNPAID / Partial / PAID / WAIVED</b> and a month picker. <b>Mark Paid</b> records a full payment.</p>
+<figure><img src="guide-images/24-billing.png" alt="Billing"><figcaption><b>Billing &amp; Payments.</b> Top: Total Revenue, Outstanding, Paid Sessions and Unpaid Invoices.</figcaption></figure>
+<div class="note box"><b class="t">Discounts and waiving</b><p>Front-desk logins cannot waive or discount a fee. If a client needs a concession, ask the clinic owner.</p></div>
+
+<h3>Monthly Report</h3>
+<p>One page that tells the whole story of a month. Change the month with the arrows. Use <b>CSV</b> to download for Excel, or <b>Print</b> to make a PDF.</p>
+<figure><img src="guide-images/25-monthly-report.png" alt="Monthly report"><figcaption><b>Monthly Report.</b> Sessions completed, completion rate, clients seen (new vs returning), <b>follow-up adherence</b> (how many promised follow-ups really happened), money collected and outstanding, new enquiries, and how clients moved between the five statuses.</figcaption></figure>
+
+<!-- ============================== PART 4 ============================== -->
+<h1 id="p4"><small>Part 4 &middot; For therapists</small>Therapist guide</h1>
+<p class="lead">Your job: see the client, write the notes, say how the case is going, and say when the client should return. Everything else is handled for you.</p>
+<p>Your menu has six sections: <b>Schedule, My Clients, Case History, Session Notes, Follow-up, My Session Reports</b>.</p>
+
+<h2>4.1 Schedule &mdash; your day</h2>
+<figure><img src="guide-images/30-schedule.png" alt="Therapist schedule"><figcaption><b>Schedule.</b> Today&rsquo;s sessions in time order. The four boxes show today&rsquo;s sessions, still to do, completed, and notes pending. Each session card has three buttons: <b>Open client</b>, <b>Case history</b> and <b>Complete session</b>. Use the arrows or calendar to change day, or <b>Week</b> to see the whole week.</figcaption></figure>
+<figure><img src="guide-images/31-schedule-week.png" alt="Week view"><figcaption><b>Week view.</b> A quick look at the days ahead.</figcaption></figure>
+<div class="tip box"><b class="t">Before the session</b><p>Click <b>Case history</b> on the client&rsquo;s card to read earlier notes in 30 seconds. The chip beside the name (for example <i>Ongoing</i>, <i>Session 5</i>, <i>Returning</i>) tells you the client&rsquo;s stage at a glance.</p></div>
+
+<h2 id="p4-done">4.2 Complete a session &mdash; notes, status, follow-up in one go</h2>
+<p>After the session, click <b>Complete session</b>. One window handles three things so nothing is forgotten.</p>
+<ol class="steps">
+  <li><b>Session notes (optional):</b> fill the four SOAP boxes &mdash; Subjective, Objective, Assessment, Plan. You can skip this now and write them later in <b>Session Notes</b>.</li>
+  <li><b>Session status:</b> tap one of <span class="chip c-new">New Case</span> <span class="chip c-ong">Ongoing</span> <span class="chip c-per">Periodic Follow-up</span> <span class="chip c-ter">Terminated</span> <span class="chip c-drp">Dropped</span>. The current status is already selected.</li>
+  <li><b>Next follow-up:</b> keep <b>Schedule one</b> ticked, choose a <b>date</b>, optionally a <b>time</b>, and add a <b>note for the front desk</b>. Choose &ldquo;Decide later&rdquo; for the time if the client will confirm later.</li>
+  <li>Read the blue summary line at the bottom, then click <b>Complete session</b>.</li>
+</ol>
+<div class="pair">
+  <figure class="m"><img src="guide-images/m-32-complete-session-top.png" alt="Complete session top"><figcaption><b>Top:</b> SOAP notes and session status.</figcaption></figure>
+  <figure class="m"><img src="guide-images/m-33-complete-session-bottom.png" alt="Complete session bottom"><figcaption><b>Bottom:</b> next follow-up and the summary of what will happen.</figcaption></figure>
+</div>
+<div class="note box"><b class="t">All or nothing</b><p>The window does everything together: marks the session complete, saves the notes, changes the status, and sets the follow-up. If something fails, <b>nothing</b> is half-saved. Just try again.</p></div>
+<div class="warn box"><b class="t">Choosing Terminated or Dropped</b><p>These close the case. The follow-up part is hidden and any waiting follow-up is cancelled. If you chose by mistake, change the status again from the client&rsquo;s profile.</p></div>
+
+<h2 id="p4-clients">4.3 My Clients and the client profile</h2>
+<p><b>My Clients</b> lists <i>your</i> clients. Filter by status, search by name, and click one to open their profile.</p>
+<figure><img src="guide-images/34-my-clients.png" alt="My clients"><figcaption><b>My Clients.</b> Each client has a status chip.</figcaption></figure>
+<figure><img src="guide-images/35-client-profile.png" alt="Client profile"><figcaption><b>Client profile (&ldquo;Client Timeline&rdquo;).</b> On the right: every session, newest first, with its status. Click <b>View Details &amp; Notes</b> on a session to read what was written. On the left: an automatic <b>Treatment Summary</b> and an <b>Export</b> button. Buttons on top: <b>Add Note</b>, <b>Schedule</b> (book the next session yourself), <b>Add Session</b> (record a past session), <b>Delete</b>, and <b>Flag as High Risk</b>.</figcaption></figure>
+<p>Scroll down on the left to find the <b>Session status</b> card. It shows the current status, the next follow-up and the status history. Click <b>Update</b> to change the status.</p>
+<figure class="m"><img style="--px:480" src="guide-images/m-36-update-status.png" alt="Update status window"><figcaption><b>Update session status.</b> Pick the new status, optionally write a <b>reason</b>, then <b>Save status</b>. The change is logged in the client&rsquo;s history.</figcaption></figure>
+<div class="note box"><b class="t">If you schedule a session yourself</b><p>When you click <b>Schedule</b> on a profile you can set the session length and leave the payment for the front desk. It then appears in their <b>Pending Payments</b> list.</p></div>
+
+<h2 id="p4-ch">4.4 Case History, Session Notes and Follow-up</h2>
+<h3>Case History</h3>
+<p>One page to review a whole case. Pick a client on the left; on the right see their details, a summary, and a <b>timeline</b> that mixes sessions, status changes and follow-ups in date order.</p>
+<figure><img src="guide-images/37-case-history.png" alt="Case history"><figcaption><b>Case History.</b> The left list can be filtered by status. In the timeline you can see, for example, <i>&ldquo;Session status: New Case &rarr; Ongoing&rdquo;</i> and <i>&ldquo;Follow-up set for Sun, 11 Oct&rdquo;</i>.</figcaption></figure>
+
+<h3>Session Notes</h3>
+<p>Your note to-do list. <b>Finished but not completed</b> shows sessions whose time has passed but are not yet completed &mdash; click <b>Complete session</b>. <b>Notes to write</b> lists completed sessions without notes &mdash; click <b>Write notes</b>.</p>
+<figure><img src="guide-images/38-session-notes.png" alt="Session notes"><figcaption><b>Session Notes.</b> The orange number in the menu is how many notes are waiting.</figcaption></figure>
+<figure class="m"><img style="--px:560" src="guide-images/m-39-write-notes.png" alt="Write notes window"><figcaption><b>Write notes.</b> Fill in Subjective (what the client reported), Objective (what you observed), Assessment (clinical impression) and Plan (next steps), then click <b>Save notes</b>.</figcaption></figure>
+
+<h3>Follow-up</h3>
+<p>The same follow-up list the front desk uses, so you can see who is overdue and who is booked. Add a follow-up here with <b>Add follow-up</b>.</p>
+<figure><img src="guide-images/40-therapist-follow-ups.png" alt="Therapist follow-ups"><figcaption><b>Follow-up.</b> Your clients who are due to return.</figcaption></figure>
+
+<h2 id="p4-rep">4.5 My Session Reports</h2>
+<p>Your own monthly numbers, for supervision or your records.</p>
+<figure><img src="guide-images/41-my-reports.png" alt="My reports"><figcaption><b>My Session Reports.</b> Sessions completed, completion rate, clients seen, follow-up adherence, how your clients moved between statuses, and how many <b>session notes</b> you have written (the orange line warns you of missing notes). Use <b>CSV</b> or <b>Print</b> to keep a copy.</figcaption></figure>
+
+<h2>4.6 Your Settings</h2>
+<figure><img src="guide-images/42-therapist-settings.png" alt="Therapist settings"><figcaption><b>Settings.</b> Your profile, weekly <b>availability</b> (the hours clients may book), and <b>leave days</b> (days off). Keep these correct &mdash; they decide which times the front desk can offer.</figcaption></figure>
+
+<h2>Your daily routine</h2>
+<ul class="check">
+  <li>Open <b>Schedule</b> and read today&rsquo;s list.</li>
+  <li>Before each session, glance at <b>Case history</b>.</li>
+  <li>After each session, click <b>Complete session</b> (notes, status, next follow-up).</li>
+  <li>At the end of the day, clear the number on <b>Session Notes</b>.</li>
+</ul>
+
+<!-- ============================== PART 5 ============================== -->
+<h1 id="p5"><small>Part 5 &middot; For clinic owners</small>Clinic owner guide</h1>
+<p class="lead">You can do everything the receptionist and therapist can. This part covers what only you set up: services, staff, access, settings and your plan.</p>
+
+<h2>5.1 Overview and Analytics</h2>
+<figure><img src="guide-images/50-owner-overview.png" alt="Owner overview"><figcaption><b>Overview.</b> The live picture of your clinic.</figcaption></figure>
+<figure><img src="guide-images/58-analytics.png" alt="Analytics"><figcaption><b>Analytics.</b> Charts for bookings, revenue and how many clients return. Use it to see what is growing.</figcaption></figure>
+<p>For month-end, use <b>Monthly Report</b> (shown in Part 3) &mdash; it covers the whole clinic.</p>
+
+<h2 id="p5-svc">5.2 Services &mdash; what you offer and what it costs</h2>
+<figure><img src="guide-images/51-services.png" alt="Services"><figcaption><b>Services.</b> Each card is one kind of session, with its <b>length</b>, a <b>category tag</b> (Counselling, Therapy, Assessment&hellip;) and prices for <b>In-person</b> and <b>Online</b>. The yellow banner and the &ldquo;<b>Needs pricing &mdash; not bookable yet</b>&rdquo; label mean no price has been set, so clients cannot book it.</figcaption></figure>
+<ol class="steps">
+  <li>Click <b>Add Service</b> (or the pencil on an existing card).</li>
+  <li>Give it a <b>name</b>, a short description, a <b>category</b> (Counselling, Therapy, Assessment, Career or Other), the <b>duration</b> and an <b>icon</b>. The duration is the same for in-person and online &mdash; only the price differs.</li>
+  <li>Click <b>Save Service</b>.</li>
+  <li>Then set the <b>price per therapist</b> in <b>Staff &rarr; Schedule &amp; Pricing</b> (next section).</li>
+</ol>
+<figure class="m"><img style="--px:420" src="guide-images/m-52-service-edit.png" alt="Edit service"><figcaption><b>Edit a service.</b> The <b>category</b> is what groups it in the booking wizard.</figcaption></figure>
+<div class="note box"><b class="t">Good to know</b><p>The software starts with twelve ready-made services (for example Initial Consultation, Individual Therapy, Psychological Assessment) so you do not begin from nothing. Rename or switch off any you do not need.</p></div>
+
+<h2 id="p5-staff">5.3 Staff &mdash; people, prices and access</h2>
+<figure><img src="guide-images/53-staff.png" alt="Staff"><figcaption><b>Staff Management.</b> Therapists are listed under <b>Psychologists</b>; front-desk people under <b>Support Staff</b>. Each row has: <b>Schedule &amp; Pricing</b>, &#9998; edit, &#128273; reset password, and a red icon to <b>disable</b> a login. Under each name, ticks show what they can open (<b>Dashboard access</b>).</figcaption></figure>
+
+<h3>Add a person</h3>
+<ol class="steps">
+  <li>Click <b>Add Staff</b>. The <b>New Staff Account</b> window opens.</li>
+  <li>Choose the <b>Role</b>: <b>Receptionist</b> for the front desk, <b>Psychologist</b> for a therapist, or <b>Staff</b> for other support people.</li>
+  <li>Fill in the <b>full name</b>, <b>job title</b>, <b>login email</b> and a first <b>password</b> (at least 8 characters). A photo is optional.</li>
+  <li>Under <b>Dashboard access</b>, tick what this person may open (see below), then save the account at the bottom of the window.</li>
+  <li>Tell them their email and password privately, and ask them to keep it safe.</li>
+</ol>
+<figure class="m"><img style="--px:380" src="guide-images/m-54-add-staff.png" alt="Add staff"><figcaption><b>New Staff Account.</b> Scroll inside the window to reach the access ticks and the save button.</figcaption></figure>
+
+<h3>Set a therapist&rsquo;s services, prices and hours</h3>
+<p>Click <b>Schedule &amp; Pricing</b> on a therapist. There are two tabs:</p>
+<ul>
+  <li><b>Services &amp; Pricing:</b> for each service switch <b>In-person</b> and/or <b>Online</b> on and type the <b>price</b>. A service is bookable only when at least one is on.</li>
+  <li><b>Availability:</b> the weekly hours when that therapist can be booked.</li>
+</ul>
+<figure class="m"><img style="--px:520" src="guide-images/m-55-schedule-pricing.png" alt="Schedule and pricing"><figcaption><b>Services &amp; Pricing</b> for Dr. Asha Menon. The two switches on each service control in-person and online; the box below each switch is the price.</figcaption></figure>
+
+<h3>Control what each person can open</h3>
+<p>Support staff always get <b>Appointments</b> and <b>Patients</b>. Tick the extra boxes &mdash; <b>Billing, Analytics, Settings &amp; Services</b> &mdash; only for people you trust with them. The change works the next time they open the page.</p>
+<div class="warn box"><b class="t">Give the least access needed</b><p>Most receptionists need Appointments, Patients and Billing only. Keep &ldquo;Settings &amp; Services&rdquo; for yourself or a manager.</p></div>
+
+<h2 id="p5-set">5.4 Settings and Subscription</h2>
+<figure><img src="guide-images/56-settings.png" alt="Settings"><figcaption><b>Settings.</b> Five tabs: <b>Profile</b> (accept new bookings on/off, photo, bio, and your <b>public booking link</b> with Copy / WhatsApp / Email buttons), <b>Availability</b>, <b>Practice Info</b>, <b>Payment &amp; Banking</b> (where clients send money) and <b>Leave Days</b>.</figcaption></figure>
+<div class="tip box"><b class="t">Share your booking link</b><p>Put the booking link on your website, Instagram or WhatsApp. Clients can then book without a login.</p></div>
+
+<figure><img src="guide-images/57-subscription.png" alt="Subscription"><figcaption><b>Subscription.</b> Shows your plan status, <b>days remaining</b>, trial end date and yearly price. To pay: send the amount to the UPI ID shown, type the <b>UTR (transaction reference)</b>, optionally add a screenshot, and click <b>Submit for Verification</b>. The platform admin checks it and activates your plan.</figcaption></figure>
+<div class="stop box"><b class="t">Do not let the plan run out</b><p>When the trial or plan ends, the whole clinic is <b>locked</b> (see Part 8, &ldquo;Everything is locked&rdquo;). Pay a few days early and watch the <b>Days remaining</b> number.</p></div>
+
+<!-- ============================== PART 6 ============================== -->
+<h1 id="p6"><small>Part 6</small>The client&rsquo;s side &amp; the platform admin</h1>
+
+<h2>6.1 The public booking page</h2>
+<p>Every clinic has its own link, for example <span class="k">your-site/book/your-clinic</span>. Clients need <b>no account</b>. They go through five steps: <b>Details &rarr; Practitioner &rarr; Session &rarr; Schedule &rarr; Confirm</b>.</p>
+<figure class="narrow"><img src="guide-images/02-public-booking.png" alt="Public booking page"><figcaption><b>Booking page, step 1.</b> The client types their name, phone (and optionally email and a note), then continues. They can choose a session type by category, pick a free time, and confirm. If the clinic asks for online payment, they pay and upload a screenshot, and the front desk checks it.</figcaption></figure>
+<div class="note box"><b class="t">What staff see</b><p>The booking appears in <b>Appointments</b>. A new person also becomes a <b>Lead</b> and turns into a <b>Patient</b> once the first booking is completed.</p></div>
+
+<h2 id="p6-track">6.2 The client tracking page</h2>
+<p>After booking, the client gets a private <b>tracking link</b> by message or email. It shows the status of the booking and the details. It needs no login. Keep the link private &mdash; anyone with it can see the booking.</p>
+<figure class="narrow"><img src="guide-images/70-client-tracking.png" alt="Tracking page"><figcaption><b>&ldquo;Your Booking Status&rdquo;.</b> The client sees <b>Confirmed</b>, their name, date, time and session type.</figcaption></figure>
+
+<h1 id="p7" style="page-break-before:auto;margin-top:26px"><small>Part 7</small>Platform admin</h1>
+<p>This is for the person who owns the whole platform and looks after many clinics. It uses a different login page, <span class="k">/admin</span>. Clinic staff never need it.</p>
+<figure><img src="guide-images/60-admin-dashboard.png" alt="Admin dashboard"><figcaption><b>Super-admin dashboard.</b> Top cards: total clinics, total individual practitioners, total revenue and total payments. Next: <b>Subscriptions</b> by state (Active, Trial, Expired, Suspended) &mdash; click a tile to filter the list of clinics below. Then <b>Payments</b>: successful, pending and failed. Scroll down for the list of clinics, where you can check subscription payments, activate or suspend a clinic, and help reset a clinic owner&rsquo;s password.</figcaption></figure>
+
+<!-- ============================== PART 8 ============================== -->
+<h1 id="p8"><small>Part 8</small>Problems &amp; how to fix them</h1>
+<p class="lead">Find your problem in the left column. Try the fix in the right column. If it still does not work, tell your clinic owner &mdash; and, if you are the owner, see the technical part at the end.</p>
+
+<div class="grp">Logging in &amp; access</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>&ldquo;Too many attempts&rdquo; or the login does nothing</td><td>Too many tries in a short time. This protects the account.</td><td>Wait a few minutes. Type the password slowly and check Caps Lock, then try once.</td></tr>
+  <tr><td>I forgot my password</td><td>&mdash;</td><td><b>Staff:</b> ask the owner to open <b>Staff</b> and click the key icon to set a new one. <b>Owner:</b> ask the platform admin.</td></tr>
+  <tr><td>I am thrown back to the login page</td><td>Your sign-in expired.</td><td>Just log in again. This is normal after a long time away.</td></tr>
+  <tr><td>My login says it is disabled</td><td>The owner switched it off (for example someone left).</td><td>The owner can turn it on again in <b>Staff</b>.</td></tr>
+  <tr><td>&ldquo;You don&rsquo;t have permission&rdquo;, or a menu item is missing</td><td>Your role does not include that screen.</td><td>Ask the owner to tick the right box under <b>Staff &rarr; Dashboard access</b> (Billing, Analytics, Settings &amp; Services).</td></tr>
+  <tr><td>Everything is locked, with a message about the subscription or a payment</td><td>The trial or paid plan has ended.</td><td>Owner: open <b>Subscription</b>, pay, and submit the UTR. The platform admin approves it and the clinic opens again.</td></tr>
+</table>
+
+<div class="grp">Booking &amp; scheduling</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>The service list is empty, or a service says &ldquo;<b>Needs pricing &mdash; not bookable yet</b>&rdquo;</td><td>No therapist offers it yet, or no price is set.</td><td>Owner: <b>Staff &rarr; Schedule &amp; Pricing</b> &rarr; switch on In-person/Online and type a price. Also check <b>Services</b>.</td></tr>
+  <tr><td>No times are shown for the chosen date</td><td>The therapist has no working hours that day, is on leave, or the day is already full. Or the date is in the past.</td><td>Try another date or <b>Online/In-person</b>. Owner/therapist: check <b>Availability</b> and <b>Leave Days</b>.</td></tr>
+  <tr><td>&ldquo;That time was just taken&rdquo;</td><td>Someone else booked the same slot a second ago.</td><td>Click <b>Back</b>, pick another time. No harm done &mdash; nothing was double-booked.</td></tr>
+  <tr><td>I cannot continue past the Therapist step</td><td>A receptionist must choose a therapist.</td><td>Click a therapist card so it is highlighted, then <b>Continue</b>.</td></tr>
+  <tr><td>The therapist I need is not in the list</td><td>That therapist does not offer the service you chose.</td><td>Go <b>Back</b> and change the service, or ask the owner to switch the service on for that therapist.</td></tr>
+  <tr><td>The client shows twice</td><td>The phone number was typed differently.</td><td>Always search by the full phone number first. Ask the owner if two records must be tidied.</td></tr>
+  <tr><td>The client says they did not get a message</td><td>Email/SMS are optional extras and may not be switched on.</td><td>Copy the client&rsquo;s <b>tracking link</b> and send it yourself. The owner can ask IT to add the email/SMS keys (see below).</td></tr>
+</table>
+
+<div class="grp">Payments &amp; billing</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>I cannot collect more than the balance</td><td>The amount is limited to what is due.</td><td>Type the exact amount due, or less for a part-payment.</td></tr>
+  <tr><td>&ldquo;Someone else changed this&rdquo; when saving a payment</td><td>Two people edited the same invoice at once.</td><td>Click <b>Refresh</b>, check the new balance, and try again.</td></tr>
+  <tr><td>Waive / discount is refused</td><td>Front-desk logins cannot reduce fees.</td><td>Ask the clinic owner to do it.</td></tr>
+  <tr><td>Revenue shows ₹0 but sessions took place</td><td>Revenue counts only <i>money received</i>.</td><td>Record the payments in <b>Pending Payments</b> (or <b>Mark Paid</b> in <b>Billing</b>).</td></tr>
+  <tr><td>A booking is stuck on &ldquo;Awaiting&rdquo; or &ldquo;Verifying Payment&rdquo;</td><td>The client has not paid, or nobody has checked their screenshot yet.</td><td>Check the bank/UPI. If the money arrived, approve it; if not, contact the client.</td></tr>
+</table>
+
+<div class="grp">Sessions, notes &amp; follow-ups</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>I cannot add a follow-up &mdash; &ldquo;already has one&rdquo;</td><td>A client may have only one open follow-up.</td><td>Open <b>Follow-ups</b>, then edit or cancel the existing one (or mark it done) and add the new one.</td></tr>
+  <tr><td>A follow-up disappeared</td><td>The case was set to <b>Terminated</b> or <b>Dropped</b>, which cancels waiting follow-ups.</td><td>Set the status back to <b>Ongoing</b> or <b>New Case</b> and add a new follow-up.</td></tr>
+  <tr><td>I completed a session with the wrong status</td><td>Mistake while choosing.</td><td>Open the client&rsquo;s profile &rarr; <b>Session status</b> &rarr; <b>Update</b>. Every change is saved in the history.</td></tr>
+  <tr><td>&ldquo;Finished but not completed&rdquo; shows in Session Notes</td><td>The session time passed but it was never completed.</td><td>Click <b>Complete session</b> next to it.</td></tr>
+  <tr><td>Notes are still waiting (orange number)</td><td>Notes were skipped when completing.</td><td>Open <b>Session Notes</b> and click <b>Write notes</b>.</td></tr>
+  <tr><td>A file will not upload</td><td>Files may be at most <b>3 MB</b>.</td><td>Shrink the photo or scan, or split the PDF, then upload again.</td></tr>
+  <tr><td>I cannot see a client I expect</td><td>Therapists see their <b>own</b> clients in <b>My Clients</b>.</td><td>Receptionists and owners can see everyone in <b>Patients</b>. Check the spelling or clear the status filter.</td></tr>
+</table>
+
+<div class="grp">Screen &amp; browser</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>The page looks broken or old</td><td>The browser kept an old copy.</td><td>Press <b>Ctrl + F5</b> (Windows) or <b>Cmd + Shift + R</b> (Mac).</td></tr>
+  <tr><td>The first page after a quiet time is slow</td><td>The system &ldquo;wakes up&rdquo;.</td><td>Wait ten seconds. This is normal and happens once.</td></tr>
+  <tr><td>Times look one day or a few hours off</td><td>The clinic time zone setting is wrong.</td><td>IT: set <span class="k">APP_TIMEZONE</span> (for example <span class="k">Asia/Kolkata</span>) and redeploy.</td></tr>
+  <tr><td>The chat bubble says it &ldquo;isn&rsquo;t configured&rdquo;</td><td>The optional AI key is not set.</td><td>IT: add <span class="k">AI_API_KEY</span>. Everything else works without it.</td></tr>
+</table>
+
+<div class="grp">For the owner / IT person (technical, but simple)</div>
+<table class="fix">
+  <tr><th>What you see</th><th>Why</th><th>What to do</th></tr>
+  <tr><td>Every user gets errors</td><td>The database cannot be reached.</td><td>Open <span class="k">your-site/api/v1/health?deep=1</span>. It must say <span class="k">UP</span>. If not, check <span class="k">DATABASE_URL</span> in Vercel &rarr; Settings &rarr; Environment Variables, and that the database (Neon) is running and within its limits.</td></tr>
+  <tr><td>Everyone was logged out after an update</td><td>The <span class="k">JWT_SECRET</span> value changed.</td><td>Put the <b>old</b> secret back, redeploy. Never change it casually.</td></tr>
+  <tr><td>Emails or SMS do not arrive</td><td>The sending keys are missing.</td><td>Add <span class="k">RESEND_API_KEY</span> (email) and <span class="k">TWILIO_*</span> (SMS/WhatsApp) in Vercel and redeploy. Also check the spam folder.</td></tr>
+  <tr><td>Telegram alerts stopped</td><td>The Telegram webhook is not set.</td><td>Set <span class="k">TELEGRAM_BOT_TOKEN</span> and <span class="k">APP_BASE_URL</span>, then run <span class="k">npm run telegram:webhook</span> once.</td></tr>
+  <tr><td>Uploads over 3 MB fail</td><td>Vercel limits request size to about 4.5 MB.</td><td>This is a limit of the host, not a bug. Keep files small.</td></tr>
+  <tr><td>Too many login attempts from bots</td><td>The built-in limiter works per server copy.</td><td>Add a Vercel Firewall rate-limit rule for <span class="k">/api/v1/auth/*</span> and <span class="k">/api/v1/public/*</span>.</td></tr>
+  <tr><td>I need a backup</td><td>&mdash;</td><td>Use the database provider&rsquo;s point-in-time recovery (Neon has it built in). Test a restore once a quarter.</td></tr>
+</table>
+
+<div class="warn box"><b class="t">Still stuck?</b><p>Write down: <b>who you are</b> (role), <b>what you clicked</b>, <b>what you expected</b>, and <b>what happened</b> &mdash; plus a screenshot. That lets the owner or IT person fix it in minutes.</p></div>
+
+<!-- ============================== PART 9 ============================== -->
+<h1 id="p9"><small>Part 9</small>Good habits &amp; checklists</h1>
+
+<h2>9.1 Protecting client privacy</h2>
+<ul>
+  <li>Client records and session notes are <b>private health information</b>. Open them only for your work.</li>
+  <li>Use <b>your own login</b> always. Never use someone else&rsquo;s.</li>
+  <li><b>Log out</b> when you leave a shared computer, and lock your screen when you step away.</li>
+  <li>Do not send a client&rsquo;s tracking link to anyone but the client.</li>
+  <li>Owners: when someone leaves the clinic, <b>disable their login</b> on the same day (Staff &rarr; red icon).</li>
+  <li>Give each person only the access they need.</li>
+</ul>
+
+<h2>9.2 Daily checklists</h2>
+<table>
+  <tr><th style="width:50%"><span class="rolebar">Receptionist</span></th><th><span class="rolebar o">Owner</span></th></tr>
+  <tr><td>
+    <ul class="check">
+      <li>Open <b>Follow-ups</b>: book the overdue ones first.</li>
+      <li>Check <b>Appointments</b> for Pending / Verifying Payment.</li>
+      <li>Return calls and clear <b>Leads</b>.</li>
+      <li>Through the day: <b>New Booking</b> for each enquiry.</li>
+      <li>End of day: clear <b>Pending Payments</b> for today.</li>
+    </ul></td>
+    <td>
+      <ul class="check">
+        <li>Glance at <b>Overview</b> and the bell.</li>
+        <li>Weekly: check <b>Follow-up adherence</b> in the Monthly Report.</li>
+        <li>Monthly: print or download the <b>Monthly Report</b>.</li>
+        <li>Keep an eye on <b>Subscription &rarr; Days remaining</b>.</li>
+        <li>Review who has which <b>Dashboard access</b>.</li>
+      </ul></td></tr>
+</table>
+
+<h2>9.3 One-page cheat sheet</h2>
+<table>
+  <tr><th style="width:36%">I want to&hellip;</th><th>Go to&hellip;</th></tr>
+  <tr><td>Book a new session</td><td>Appointments &rarr; <b>New Booking</b></td></tr>
+  <tr><td>Collect money for a confirmed session</td><td>Pending Payments &rarr; <b>Collect Payment</b></td></tr>
+  <tr><td>Bring a client back for the next visit</td><td>Follow-ups &rarr; <b>Book session</b></td></tr>
+  <tr><td>Finish a session and write notes</td><td>Schedule &rarr; <b>Complete session</b></td></tr>
+  <tr><td>Change how a client&rsquo;s case is going</td><td>Client profile &rarr; Session status &rarr; <b>Update</b></td></tr>
+  <tr><td>Read a client&rsquo;s whole story</td><td>Case History</td></tr>
+  <tr><td>See my month</td><td>My Session Reports (therapist) or Monthly Report (clinic)</td></tr>
+  <tr><td>Add a new kind of session</td><td>Services &rarr; <b>Add Service</b>, then Staff &rarr; Schedule &amp; Pricing</td></tr>
+  <tr><td>Add or remove a staff member</td><td>Staff &rarr; <b>Add Staff</b> / disable icon</td></tr>
+  <tr><td>Give clients a booking link</td><td>Settings &rarr; Profile &rarr; <b>Your booking link</b></td></tr>
+</table>
+
+<h2>9.4 Test logins (test copy only)</h2>
+<div class="stop box"><b class="t">Only for the practice/demo copy</b><p>These accounts exist only on the demo copy of the software used for training. <b>Delete these accounts and change every password before real clients are added.</b></p></div>
+<table>
+  <tr><th>Role</th><th>Email</th><th>Password</th></tr>
+  <tr><td>Receptionist</td><td>demo-riya@psyfos.test</td><td>Reception#123</td></tr>
+  <tr><td>Therapist</td><td>demo-asha@psyfos.test</td><td>Therapist#123</td></tr>
+  <tr><td>Therapist (2nd)</td><td>demo-ravi@psyfos.test</td><td>Therapist#123</td></tr>
+  <tr><td>Clinic owner</td><td>demo-owner@psyfos.test</td><td>Passw0rd!123</td></tr>
+  <tr><td>Demo booking page</td><td colspan="2"><span class="k">/book/psyfos-demo-clinic</span></td></tr>
+</table>
+<p class="small">The platform admin&rsquo;s email and password are set by the person who installs the software and are not printed here.</p>
+
+</div>
+</body>
+</html>

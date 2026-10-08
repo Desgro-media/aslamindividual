@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-import { Target, Search, Phone, Mail, CheckCircle2, Circle } from "lucide-react";
+import { Target, Search, Phone, Mail, CheckCircle2, Circle, CalendarPlus } from "lucide-react";
 import api from "../../../lib/api";
+import NewBookingWizard from "../../../components/psyfos/NewBookingWizard";
 
 type Lead = {
   id: number;
@@ -18,13 +19,17 @@ export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Client Enquiry -> Client Details -> booking: an enquiry opens the booking
+  // flow with its details already filled in.
+  const [booking, setBooking] = useState<Lead | null>(null);
 
-  useEffect(() => {
+  const loadLeads = () => {
     api.get("/leads")
       .then(res => setLeads(res.data))
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  };
+  useEffect(() => { loadLeads(); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -94,7 +99,7 @@ export default function LeadsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--card-border)" }}>
-                  {["Name", "Contact", "Note", "Status", "Received"].map(h => (
+                  {["Name", "Contact", "Note", "Status", "Received", ""].map(h => (
                     <th key={h} style={{
                       textAlign: "left", padding: "14px 20px", fontSize: 11, fontWeight: 700,
                       color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em",
@@ -148,12 +153,27 @@ export default function LeadsPage() {
                     <td style={{ padding: "16px 20px", fontSize: 12, color: "var(--text-3)" }}>
                       {new Date(lead.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
                     </td>
+                    <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                      {lead.status !== "CONVERTED" && (
+                        <button onClick={() => setBooking(lead)} className="btn-nm" style={{ padding: "7px 14px", fontSize: 12, fontWeight: 700, gap: 6, color: "var(--accent)" }}>
+                          <CalendarPlus style={{ width: 13, height: 13 }} /> Book session
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+      )}
+
+      {booking && (
+        <NewBookingWizard
+          prefill={{ name: booking.name, phone: booking.phone, email: booking.email ?? "", notes: booking.notes ?? "" }}
+          onClose={() => setBooking(null)}
+          onBooked={() => loadLeads()}
+        />
       )}
     </div>
   );
