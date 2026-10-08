@@ -23,12 +23,14 @@ export function clientIp(req: Request): string {
 // blunts a single-source flood but is not a global limit. For a hard limit add
 // a Vercel Firewall rate-limit rule on /api/v1/auth/* and /api/v1/public/*.
 
-interface Bucket { key: string; limit: number; windowMs: number }
+// failuresOnly: the bucket is checked on every request but only grows when the caller
+// reports a failure — so a shared office IP full of correct logins is never throttled.
+interface Bucket { key: string; limit: number; windowMs: number; failuresOnly?: boolean }
 
 const BOOKING_SUBMIT: Bucket = { key: "booking", limit: 8, windowMs: 10 * 60_000 };
 const PATIENT_CHECK: Bucket = { key: "patient-check", limit: 20, windowMs: 60_000 };
 const PUBLIC_READ: Bucket = { key: "public-read", limit: 120, windowMs: 60_000 };
-const LOGIN_ATTEMPT: Bucket = { key: "login", limit: 10, windowMs: 15 * 60_000 };
+const LOGIN_ATTEMPT: Bucket = { key: "login", limit: 10, windowMs: 15 * 60_000, failuresOnly: true };
 const SIGNUP_ATTEMPT: Bucket = { key: "signup", limit: 15, windowMs: 15 * 60_000 };
 
 const counters = new Map<string, { windowStart: number; count: number }>();
@@ -43,9 +45,7 @@ function bucketFor(method: string, path: string): Bucket | null {
 }
 
 /** True when the request is allowed to proceed. */
-export function rateLimitAllows(req: Request, path: string): boolean {
-    const bucket = bucketFor(req.method, path);
-    if (!bucket) return true;
+function counterFor(bucket: Bucket, req: Request) {
     const key = `${bucket.key}:${clientIp(req)}`;
     const now = Date.now();
     let c = counters.get(key);
@@ -53,10 +53,23 @@ export function rateLimitAllows(req: Request, path: string): boolean {
         c = { windowStart: now, count: 0 };
         counters.set(key, c);
     }
-    c.count += 1;
     // Safety valve against unbounded growth from many distinct IPs.
     if (counters.size > 50_000) counters.clear();
+    return c;
+}
+
+export function rateLimitAllows(req: Request, path: string): boolean {
+    const bucket = bucketFor(req.method, path);
+    if (!bucket) return true;
+    const c = counterFor(bucket, req);
+    if (bucket.failuresOnly) return c.count < bucket.limit;
+    c.count += 1;
     return c.count <= bucket.limit;
+}
+
+/** Counts one failed sign-in against the caller's IP (see LOGIN_ATTEMPT). */
+export function recordLoginFailure(req: Request): void {
+    counterFor(LOGIN_ATTEMPT, req).count += 1;
 }
 
 // ── Superadmin IP allowlist ──────────────────────────────────────────────────

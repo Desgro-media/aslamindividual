@@ -2,7 +2,7 @@ import { Db, getDb } from "./db";
 import { ApiError, JsonObject, errorResponse, json, readJson, unauthorized } from "./http";
 import { currentUserFromRequest } from "./security/auth";
 import {
-    clientIp, permissionAllows, rateLimitAllows, subscriptionAllows, superAdminIpAllowed,
+    clientIp, permissionAllows, rateLimitAllows, recordLoginFailure, subscriptionAllows, superAdminIpAllowed,
 } from "./security/guards";
 import { AppUser, Roles } from "./types";
 import { ensureReady } from "./bootstrap";
@@ -171,7 +171,13 @@ async function handle(req: Request): Promise<Response> {
         optionalBody: async () => (bodyCache ??= await readJson(req, { optional: true })),
     };
 
-    const result = await matched.handler(ctx);
+    let result: Awaited<ReturnType<Route["handler"]>>;
+    try {
+        result = await matched.handler(ctx);
+    } catch (err) {
+        if (method === "POST" && path.endsWith("/auth/login")) recordLoginFailure(req);
+        throw err;
+    }
     if (result instanceof Response) return result;
     if (result === undefined) return new Response(null, { status: 204 });
     return json(result);
