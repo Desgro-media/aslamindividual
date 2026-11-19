@@ -97,10 +97,24 @@ export function registerPublicRoutes(): void {
         const date = parseDate(c.query.get("date"), "date");
         const doctorId = await resolveBookableDoctorId(c.db, owner, staffIdParam(c));
         // Holiday/closure is clinic-wide; slot conflict is per practitioner; booked-slot
-        // exclusion is mode-agnostic. No `duration` on the public side: patients never
-        // choose the session length.
+        // exclusion is mode-agnostic. Patients never choose the session length, but the
+        // page says which length the booking will have — `serviceId` (the chosen service's
+        // own length) or, when rebooking, `duration` (the cancelled session's length) —
+        // so a start time is only offered if that whole session fits. Sessions the doctor
+        // scheduled by hand can start at any minute and run any length, so checking the
+        // start time alone would offer times that then fail with "slot just booked".
         const holiday = await c.db.one("SELECT 1 FROM clinic_holiday WHERE holiday_date = $1 AND psychologist_id = $2", [date, owner.id]);
-        return avail.getAvailableSlotsForDoctor(c.db, doctorId, date, !!holiday, c.query.get("mode"), null);
+        let minutes: number | null = null;
+        const rawDuration = c.query.get("duration");
+        const rawService = c.query.get("serviceId");
+        if (rawDuration) {
+            const n = Number(rawDuration);
+            if (!Number.isInteger(n)) throw badRequest("Invalid value for 'duration'.");
+            minutes = n;
+        } else if (rawService) {
+            minutes = await appts.resolveSessionDurationMinutes(c.db, rawService, owner.id);
+        }
+        return avail.getAvailableSlotsForDoctor(c.db, doctorId, date, !!holiday, c.query.get("mode"), minutes);
     });
 
     get("/public/:slug/holidays", "public", async (c) => {

@@ -90,7 +90,13 @@ export default function RebookPage() {
     setSelectedTime("");
     try {
       const dateStr = format(date, "yyyy-MM-dd");
-      const res = await api.get(`/public/${originalAppt.psychologistSlug}/slots?date=${dateStr}`);
+      // A rebooking keeps the cancelled session's length (which may be a custom one
+      // the doctor set), so only offer starts where that whole session fits.
+      const [sh, sm] = String(originalAppt.startTime ?? "").split(":").map(Number);
+      const [eh, em] = String(originalAppt.endTime ?? "").split(":").map(Number);
+      const length = (eh * 60 + em) - (sh * 60 + sm);
+      const durationParam = Number.isFinite(length) && length >= 15 && length <= 240 ? `&duration=${length}` : "";
+      const res = await api.get(`/public/${originalAppt.psychologistSlug}/slots?date=${dateStr}${durationParam}`);
       setAvailableSlots(Array.isArray(res.data) ? res.data : []);
     } catch {
       setAvailableSlots([]);

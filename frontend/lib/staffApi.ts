@@ -59,11 +59,17 @@ export const updatePermissions = (id: number, permissions: string[]) =>
 export const updateStaffCredentials = (id: number, payload: { username?: string; password?: string }) =>
     api.patch<StaffMember>(`/staff/${id}/credentials`, payload).then(r => r.data);
 
-// "Delete" deactivates — see StaffService.deactivateStaff. Blocks login and
+// Deactivates (reversible) — see StaffService.deactivateStaff. Blocks login and
 // public bookability without losing historical appointment/invoice/note
-// attribution.
+// attribution. For permanent removal see deleteStaff below.
 export const deactivateStaff = (id: number) =>
     api.delete<StaffMember>(`/staff/${id}`).then(r => r.data);
+
+// Permanent removal (see StaffService.deleteStaff): the login and the person's own
+// schedule/pricing are deleted; past sessions, notes and invoices stay but lose the
+// doctor's name. The server refuses while they still have upcoming sessions.
+export const deleteStaff = (id: number) =>
+    api.delete(`/staff/${id}`, { params: { permanent: true } }).then(() => undefined);
 
 export const reactivateStaff = (id: number) =>
     api.post<StaffMember>(`/staff/${id}/reactivate`).then(r => r.data);

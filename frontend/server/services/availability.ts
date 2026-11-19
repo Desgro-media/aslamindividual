@@ -1,7 +1,7 @@
 import type { Db } from "../db";
 import { badRequest, notFound } from "../http";
 import {
-    WEEKDAYS, dayOfWeek, overlaps, requireValidSessionMinutes, timeToMinutes, today, nowMinutes, minutesToHm,
+    WEEKDAYS, dayOfWeek, overlaps, requireValidSessionMinutes, timeToMinutes, today, nowMinutes, minutesToHm, hm12,
 } from "../time";
 import {
     AppUser, Appointment, AvailabilityBlock, ClinicService, DateOverride, DoctorServicePrice, WeeklySlot,
@@ -415,6 +415,91 @@ export async function getAvailableSlotsForDoctor(
             return booked.every((a) => start !== a.s && !overlaps(start, end, a.s, a.e));
         })
         .sort();
+}
+
+export interface TimeCheckDto {
+    /** An existing session on this doctor's calendar that the range would overlap — a hard error at save time. */
+    conflict: { startTime: string; endTime: string } | null;
+    /** Soft warnings (outside hours, holiday, leave, already past) — the doctor may still book. */
+    warnings: string[];
+}
+
+const weekdayLabel = (dow: string) => dow.charAt(0) + dow.slice(1).toLowerCase();
+
+/**
+ * Live feedback for a hand-typed start/end on the manual scheduling form. The
+ * doctor is free to pick any time, so the chips' guards (working hours,
+ * holidays, leave, "not in the past") become warnings here, while a real
+ * overlap with another session is reported as a conflict (the booking would be
+ * refused anyway — see assertSlotFree in appointments.ts).
+ */
+export async function checkTimeRange(
+    db: Db, doctorId: number, date: string, isHoliday: boolean, mode: string | null, startMin: number, endMin: number
+): Promise<TimeCheckDto> {
+    if (endMin <= startMin) throw badRequest("End time must be after the start time");
+    requireValidSessionMinutes(endMin - startMin);
+    const resolvedMode = resolveMode(mode);
+    const modeLabel = resolvedMode === ONLINE ? "online" : "in-person";
+    const dow = dayOfWeek(date);
+    const warnings: string[] = [];
+
+    const todayStr = today();
+    if (date < todayStr) warnings.push("This date is in the past.");
+    else if (date === todayStr && startMin <= nowMinutes()) warnings.push("This start time has already passed today.");
+
+    if (isHoliday) warnings.push("The clinic is closed on this date (holiday).");
+
+    const overrides = await db.many<DateOverride>(
+        "SELECT * FROM doctor_date_override WHERE psychologist_id = $1 AND specific_date = $2 AND (mode IS NULL OR mode = $3)",
+        [doctorId, date, resolvedMode]
+    );
+    if (overrides.some((o) => !o.available && o.slotTime === null)) {
+        warnings.push("This date is marked unavailable (leave or blocked) on the calendar.");
+    } else if (!isHoliday) {
+        const blocks = await db.many<AvailabilityBlock>(
+            "SELECT * FROM doctor_availability_block WHERE psychologist_id = $1 AND day_of_week = $2 AND mode = $3",
+            [doctorId, dow, resolvedMode]
+        );
+        const weekly = await db.many<WeeklySlot>(
+            "SELECT * FROM doctor_weekly_slot WHERE psychologist_id = $1 AND day_of_week = $2 AND mode = $3 AND active = true",
+            [doctorId, dow, resolvedMode]
+        );
+        const windows: Array<[number, number]> = [];
+        for (const b of blocks) {
+            const bs = tryParseSlot(b.startTime);
+            const be = tryParseSlot(b.endTime);
+            if (bs !== null && be !== null && bs < be) windows.push([bs, be]);
+        }
+        const openStarts = new Set<number>();
+        for (const w of weekly) { const m = tryParseSlot(w.slotTime); if (m !== null) openStarts.add(m); }
+        for (const o of overrides) {
+            if (o.available && o.slotTime !== null) { const m = tryParseSlot(o.slotTime); if (m !== null) openStarts.add(m); }
+        }
+        const insideWindow = windows.some(([s, e]) => startMin >= s && endMin <= e);
+        if (!insideWindow && !openStarts.has(startMin)) {
+            if (windows.length === 0 && openStarts.size === 0) {
+                warnings.push(`No ${modeLabel} availability is set for ${weekdayLabel(dow)}s.`);
+            } else {
+                const hours = windows.sort((a, b) => a[0] - b[0]).map(([s, e]) => `${hm12(s)} – ${hm12(e)}`).join(", ");
+                warnings.push(hours
+                    ? `Outside the usual ${modeLabel} hours for ${weekdayLabel(dow)}s (${hours}).`
+                    : `Not one of the usual ${modeLabel} start times for ${weekdayLabel(dow)}s.`);
+            }
+        }
+        if (overrides.some((o) => !o.available && o.slotTime !== null && tryParseSlot(o.slotTime) === startMin)) {
+            warnings.push("That start time was marked unavailable for this date.");
+        }
+    }
+
+    const active = await db.many<Appointment>(
+        "SELECT * FROM appointment WHERE appointment_date = $1 AND assigned_doctor_id = $2 AND status <> 'CANCELLED'",
+        [date, doctorId]
+    );
+    const hit = active
+        .map((a) => ({ s: timeToMinutes(a.startTime)!, e: timeToMinutes(a.endTime)! }))
+        .sort((a, b) => a.s - b.s)
+        .find((a) => overlaps(startMin, endMin, a.s, a.e));
+    return { conflict: hit ? { startTime: minutesToHm(hit.s), endTime: minutesToHm(hit.e) } : null, warnings };
 }
 
 /**
