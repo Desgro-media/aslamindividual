@@ -1,7 +1,7 @@
 import { Ctx, del, get, patch, post, put } from "../router";
 import { badRequest, JsonObject, noContent, pathId } from "../http";
 import { tenantIdOf } from "../security/auth";
-import { parseDate } from "../time";
+import { parseDate, timeToMinutes } from "../time";
 import { AppUser } from "../types";
 import { tx } from "../db";
 import * as avail from "../services/availability";
@@ -25,6 +25,16 @@ function parseOptionalDuration(c: Ctx): number | null {
     const n = Number(raw);
     if (!Number.isInteger(n)) throw badRequest("Invalid value for 'duration'.");
     return n;
+}
+
+// Live check of a hand-typed start/end on the manual scheduling form: any overlap
+// with another session, plus soft warnings (outside hours, holiday, leave, past).
+async function timeCheck(c: Ctx, doctorId: number, tenantId: number) {
+    const date = parseDate(c.query.get("date"), "date");
+    const start = timeToMinutes(c.query.get("start"));
+    const end = timeToMinutes(c.query.get("end"));
+    if (start === null || end === null) throw badRequest("start and end must be times in HH:mm format");
+    return avail.checkTimeRange(c.db, doctorId, date, await holidayOn(c, date, tenantId), c.query.get("mode"), start, end);
 }
 
 // Shared by /me/** (the caller's own id) and /staff/:staffId/** (an owner acting
@@ -115,6 +125,8 @@ export function registerPractitionerRoutes(): void {
         return avail.getAvailableSlotsForDoctor(c.db, me.id, date, await holidayOn(c, date, tenantIdOf(me)), c.query.get("mode"), parseOptionalDuration(c));
     });
 
+    get("/me/time-check", "user", async (c) => timeCheck(c, c.me().id, tenantIdOf(c.me())));
+
     get("/me/weekly-schedule", "user", async (c) => avail.getDoctorWeeklySchedule(c.db, c.me().id));
     post("/me/weekly-slots", "user", async (c) => {
         const body = await c.body();
@@ -163,7 +175,14 @@ export function registerPractitionerRoutes(): void {
     });
     post("/staff/:id/reactivate", "user", async (c) => staffSvc.reactivateStaff(c.db, c.me(), pathId(c.params.id)));
     put("/staff/:id", "user", async (c) => staffSvc.updateStaff(c.db, c.me(), pathId(c.params.id), await c.body()));
-    del("/staff/:id", "user", async (c) => staffSvc.deactivateStaff(c.me(), pathId(c.params.id)));
+    // DELETE /staff/:id deactivates (history keeps their name); ?permanent=true removes the login for good.
+    del("/staff/:id", "user", async (c) => {
+        if (c.query.get("permanent") === "true") {
+            await staffSvc.deleteStaff(c.me(), pathId(c.params.id));
+            return noContent();
+        }
+        return staffSvc.deactivateStaff(c.me(), pathId(c.params.id));
+    });
 
     // A clinic owner managing one staff member's calendar & pricing directly.
     const ownedStaff = async (c: Ctx): Promise<AppUser> => {
@@ -175,6 +194,10 @@ export function registerPractitionerRoutes(): void {
         const staff = await ownedStaff(c);
         const date = parseDate(c.query.get("date"), "date");
         return avail.getAvailableSlotsForDoctor(c.db, staff.id, date, await holidayOn(c, date, staff.tenantId as number), c.query.get("mode"), parseOptionalDuration(c));
+    });
+    get("/staff/:staffId/time-check", "user", async (c) => {
+        const staff = await ownedStaff(c);
+        return timeCheck(c, staff.id, staff.tenantId as number);
     });
     registerAvailabilityRoutes("/staff/:staffId", ownedStaff);
 

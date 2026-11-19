@@ -198,7 +198,7 @@ async function requireAcceptingBookings(db: Db, tenantId: number): Promise<void>
 
 // The selected service's own length (its free-text duration); default 60. Only
 // the DEFAULT — the practitioner can override it per appointment.
-async function resolveSessionDurationMinutes(db: Db, sessionType: string | null, ownerId: number): Promise<number> {
+export async function resolveSessionDurationMinutes(db: Db, sessionType: string | null, ownerId: number): Promise<number> {
     if (sessionType === null || !/^[+-]?\d+$/.test(sessionType)) return DEFAULT_SESSION_MINUTES;
     const svc = await db.one<ClinicService>(
         "SELECT * FROM clinic_service WHERE id = $1 AND psychologist_id = $2", [Number(sessionType), ownerId]);
@@ -550,6 +550,8 @@ export async function requestDemoCall(request: DemoBookingRequest): Promise<Appo
 
 export interface ConvertDemoRequest {
     appointmentDate: string; startTime: string; sessionType: string | null; staffId: number | null; mode: string | null;
+    /** the practitioner-typed length (End minus Start), or null to use the service's own */
+    durationMinutes: number | null;
 }
 
 export function parseConvertRequest(body: JsonObject): ConvertDemoRequest {
@@ -559,6 +561,7 @@ export function parseConvertRequest(body: JsonObject): ConvertDemoRequest {
         sessionType: optStr(body, "sessionType"),
         staffId: optInt(body, "staffId"),
         mode: optStr(body, "mode"),
+        durationMinutes: optInt(body, "durationMinutes"),
     };
 }
 
@@ -567,7 +570,9 @@ export async function convertDemoToAppointment(id: number, caller: AppUser, tena
         let appt = await requireOwnedAppointment(db, id, tenantId);
         if (appt.status !== "DEMO_CALL_PENDING") throw conflict("Only demo call requests can be converted to appointments");
 
-        const slotDuration = await resolveSessionDurationMinutes(db, request.sessionType, tenantId);
+        const slotDuration = request.durationMinutes !== null
+            ? requireValidSessionMinutes(request.durationMinutes)
+            : await resolveSessionDurationMinutes(db, request.sessionType, tenantId);
         // The converting practitioner's own calendar is the fallback — not the
         // clinic owner's (the previous behaviour mis-attributed the session).
         const assignedDoctorId = await resolveSchedulingDoctor(db, caller, tenantId, request.staffId);
@@ -579,10 +584,16 @@ export async function convertDemoToAppointment(id: number, caller: AppUser, tena
         }
 
         const startMin = timeToMinutes(request.startTime)!;
+        const endMin = endOfSession(startMin, slotDuration);
+        // Same authoritative overlap check as every other booking path — the
+        // start time is typed freely, so nothing else stops a double-booking.
+        await lockPractitioner(db, assignedDoctorId);
+        await assertSlotFree(db, assignedDoctorId, request.appointmentDate, startMin, endMin, id,
+            "That time overlaps another session on this doctor's calendar — choose a different time or a shorter session length.");
         appt = await db.update<Appointment>("appointment", id, {
             appointmentDate: request.appointmentDate,
             startTime: request.startTime,
-            endTime: minutesToTime(endOfSession(startMin, slotDuration)),
+            endTime: minutesToTime(endMin),
             sessionType: resolvedSessionType, mode, assignedDoctorId, status: "AWAITING_PAYMENT",
         });
         const invoice = await createInvoiceForAppointment(db, appt.id);

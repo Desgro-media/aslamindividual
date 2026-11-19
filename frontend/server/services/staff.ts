@@ -1,9 +1,9 @@
 import type { Db } from "../db";
 import { tx } from "../db";
-import { JsonObject, badRequest, forbidden, notFound, optBool } from "../http";
+import { JsonObject, badRequest, conflict, forbidden, notFound, optBool } from "../http";
 import { hashPassword } from "../security/auth";
 import { parsePermissions } from "../security/guards";
-import { nowTs } from "../time";
+import { nowTs, today } from "../time";
 import { AppUser, Roles, StaffAttendance } from "../types";
 import { sendStaffCredentialsChangedEmail } from "./notifications";
 
@@ -178,6 +178,45 @@ export async function deactivateStaff(caller: AppUser, staffId: number): Promise
         const saved = await db.update<AppUser>("app_user", staffId, { enabled: false, bookable: false });
         await closeOpenSession(db, staffId);
         return toSummary(saved);
+    });
+}
+
+/**
+ * Permanent removal of a staff login — the clinic owner's "Delete", as opposed to
+ * the reversible deactivate above. It deletes the account and the things that only
+ * exist for that person (their availability, date overrides, weekly slots, service
+ * prices and login history). Everything the clinic recorded stays — appointments,
+ * notes, invoices, follow-ups — but no longer shows a doctor name, since the
+ * account is gone (use deactivate to keep the name on the records).
+ *
+ * Refused while they still have upcoming sessions: those would be left on a
+ * calendar nobody can open, so the owner has to cancel or complete them first.
+ * Clients assigned to them become unassigned (visible to the owner as before).
+ * Any signed-in device is logged out at once — the session lookup no longer
+ * finds the account.
+ */
+export async function deleteStaff(caller: AppUser, staffId: number): Promise<void> {
+    await tx(async (db) => {
+        requireClinicOwner(caller);
+        const staff = await requireOwnedStaff(db, caller, staffId);
+
+        const upcoming = Number(await db.scalar<string>(
+            `SELECT COUNT(*) FROM appointment
+              WHERE assigned_doctor_id = $1 AND appointment_date >= $2
+                AND status IN ('PENDING', 'AWAITING_PAYMENT', 'PAYMENT_UNDER_REVIEW', 'CONFIRMED')`,
+            [staffId, today()]) ?? 0);
+        if (upcoming > 0) {
+            throw conflict(
+                `${staff.name ?? "This staff member"} still has ${upcoming} upcoming session${upcoming === 1 ? "" : "s"}. ` +
+                `Cancel ${upcoming === 1 ? "it" : "them"} first, or use Deactivate instead.`);
+        }
+
+        for (const table of ["doctor_availability_block", "doctor_date_override", "doctor_weekly_slot", "doctor_service_price"]) {
+            await db.exec(`DELETE FROM ${table} WHERE psychologist_id = $1`, [staffId]);
+        }
+        await db.exec("DELETE FROM staff_attendance WHERE staff_id = $1", [staffId]);
+        await db.exec("UPDATE patient SET assigned_doctor_id = NULL WHERE assigned_doctor_id = $1", [staffId]);
+        await db.exec("DELETE FROM app_user WHERE id = $1 AND tenant_id = $2", [staffId, caller.id]);
     });
 }
 

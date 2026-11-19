@@ -130,6 +130,12 @@ export function minutesToHm(mins: number): string {
     return `${p2(Math.floor(mins / 60))}:${p2(mins % 60)}`;
 }
 
+/** "1:05 PM" — for messages shown to people, so AM/PM is never left to guesswork. */
+export function hm12(mins: number): string {
+    const h = Math.floor(mins / 60);
+    return `${h % 12 === 0 ? 12 : h % 12}:${p2(mins % 60)} ${h >= 12 ? "PM" : "AM"}`;
+}
+
 // ── LocalDateTime arithmetic (subscription windows) ──────────────────────────
 export function ldtParse(s: string): Date {
     const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(s);

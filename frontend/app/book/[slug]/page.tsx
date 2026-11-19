@@ -335,12 +335,15 @@ export default function BookingPage() {
     try {
       const staffParam = isClinic && selectedStaffId ? `&staffId=${selectedStaffId}` : "";
       const modeParam = selectedMode ? `&mode=${selectedMode}` : "";
-      const r = await publicApi.get(`/public/${slug}/slots?date=${format(date, "yyyy-MM-dd")}${staffParam}${modeParam}`);
+      // The chosen service's own length: sessions the practitioner scheduled by hand
+      // can start at any minute, so only offer a start where this whole session fits.
+      const serviceParam = selectedSession ? `&serviceId=${encodeURIComponent(selectedSession)}` : "";
+      const r = await publicApi.get(`/public/${slug}/slots?date=${format(date, "yyyy-MM-dd")}${staffParam}${modeParam}${serviceParam}`);
       setSlots(Array.isArray(r.data) ? r.data : []);
     } catch {
       setSlots([]);
     } finally { setSlotsLoading(false); }
-  }, [slug, isClinic, selectedStaffId, selectedMode]);
+  }, [slug, isClinic, selectedStaffId, selectedMode, selectedSession]);
 
   // Schedule-level view of the same calendar the slots fetch above draws
   // from — lets the date picker disable days up front instead of only
@@ -655,7 +658,12 @@ export default function BookingPage() {
                     placeholder="What brings you here, any concerns, preferred language..."
                     value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </LabeledInput>
-                <button className="btn-nm-accent w-full mt-2" onClick={next} style={{ width: "100%", marginTop: 8 }}>
+                {/* Pressing this while the phone box is focused used to blur it, which starts the
+                    returning-patient check: the "Checking…" row appears above this button and
+                    pushes it down before the mouse is released, so the click never registered.
+                    Keeping focus where it is on mouse-down avoids the shift; the check only
+                    drives the greeting on this step, so skipping it when leaving is harmless. */}
+                <button className="btn-nm-accent w-full mt-2" onClick={next} onMouseDown={e => e.preventDefault()} style={{ width: "100%", marginTop: 8 }}>
                   Continue <ChevronRight style={{ width: 15, height: 15 }} />
                 </button>
               </div>

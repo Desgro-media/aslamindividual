@@ -6,12 +6,12 @@ import {
   Plus, Pencil, X, Loader2, Check, UserCog,
   ShieldCheck, ShieldOff, RefreshCw, Brain, UserCheck,
   User, Lock, Mail, AlertCircle, CheckCircle2, LogIn, LogOut,
-  CalendarClock, DollarSign, AlertTriangle, Camera, KeyRound,
+  CalendarClock, DollarSign, AlertTriangle, Camera, KeyRound, Trash2,
 } from "lucide-react";
 import { SpotlightDiv } from "../../../components/Spotlight";
 import {
   getAllStaff, createStaff, updateStaff, updatePermissions, updateStaffCredentials,
-  deactivateStaff, reactivateStaff, getAllAttendance, getActiveStaff,
+  deactivateStaff, deleteStaff, reactivateStaff, getAllAttendance, getActiveStaff,
   StaffMember, AttendanceRecord, CreateStaffPayload,
 } from "../../../lib/staffApi";
 import { getMyServices } from "../../../lib/profileApi";
@@ -236,6 +236,23 @@ export default function StaffPage() {
     }
   };
 
+  const handleDelete = async (member: StaffMember) => {
+    if (!window.confirm(
+      `Permanently delete ${member.name}?\n\n` +
+      `• Their login, availability and pricing are removed — this can't be undone.\n` +
+      `• Past sessions, notes and invoices stay in your records, but will no longer show their name.\n` +
+      `• Clients assigned to them become unassigned.\n\n` +
+      `To keep their name on past records, use Deactivate instead.`
+    )) return;
+    try {
+      await deleteStaff(member.id);
+      flash(`${member.name} deleted.`);
+      fetchStaff();
+    } catch (err: any) {
+      flash(err?.response?.data?.message || "Failed to delete.", true);
+    }
+  };
+
   const handleReactivate = async (member: StaffMember) => {
     try {
       await reactivateStaff(member.id);
@@ -326,7 +343,7 @@ export default function StaffPage() {
                   <StaffCard key={m.id} member={m} savingPerms={savingPermsFor === m.id}
                     hasServicesConfigured={servicesConfigured[m.id]}
                     onTogglePermission={key => handleTogglePermission(m, key)}
-                    onDeactivate={() => handleDeactivate(m)} onReactivate={() => handleReactivate(m)}
+                    onDeactivate={() => handleDeactivate(m)} onDelete={() => handleDelete(m)} onReactivate={() => handleReactivate(m)}
                     onManageSchedule={() => { setScheduleModalFor(m); setScheduleTab("services"); }}
                     onManageCredentials={() => setCredentialsFor(m)}
                     onRefresh={fetchStaff} flash={flash} />
@@ -343,7 +360,7 @@ export default function StaffPage() {
                 {others.map(m => (
                   <StaffCard key={m.id} member={m} savingPerms={savingPermsFor === m.id}
                     onTogglePermission={key => handleTogglePermission(m, key)}
-                    onDeactivate={() => handleDeactivate(m)} onReactivate={() => handleReactivate(m)}
+                    onDeactivate={() => handleDeactivate(m)} onDelete={() => handleDelete(m)} onReactivate={() => handleReactivate(m)}
                     onManageCredentials={() => setCredentialsFor(m)}
                     onRefresh={fetchStaff} flash={flash} />
                 ))}
@@ -553,12 +570,13 @@ export default function StaffPage() {
 }
 
 // ── Staff card ────────────────────────────────────────────────────────────
-function StaffCard({ member, savingPerms, hasServicesConfigured, onTogglePermission, onDeactivate, onReactivate, onManageSchedule, onManageCredentials, onRefresh, flash }: {
+function StaffCard({ member, savingPerms, hasServicesConfigured, onTogglePermission, onDeactivate, onDelete, onReactivate, onManageSchedule, onManageCredentials, onRefresh, flash }: {
   member: StaffMember;
   savingPerms: boolean;
   hasServicesConfigured?: boolean;
   onTogglePermission: (key: string) => void;
   onDeactivate: () => void;
+  onDelete: () => void;
   onReactivate: () => void;
   onManageSchedule?: () => void;
   onManageCredentials: () => void;
@@ -692,6 +710,9 @@ function StaffCard({ member, savingPerms, hasServicesConfigured, onTogglePermiss
                 <ShieldCheck style={{ width: 14, height: 14 }} />
               </button>
             )}
+            <button onClick={onDelete} className="icon-btn" title="Delete permanently" aria-label={`Delete ${member.name}`} style={{ color: "var(--danger)" }}>
+              <Trash2 style={{ width: 14, height: 14 }} />
+            </button>
           </div>
         )}
       </div>

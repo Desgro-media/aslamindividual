@@ -15,6 +15,9 @@ import NewBookingWizard from "../../../components/psyfos/NewBookingWizard";
 import SessionWrapUpModal from "../../../components/psyfos/SessionWrapUpModal";
 import CaseStatusChip from "../../../components/psyfos/CaseStatusChip";
 import { useServiceNames } from "../../../components/psyfos/SessionBits";
+import SessionTimeRange from "../../../components/SessionTimeRange";
+import type { TimeCheck } from "../../../lib/profileApi";
+import { minutesBetween, parseServiceDuration, sessionRangeError, DEFAULT_SESSION_MINUTES } from "../../../lib/sessionLength";
 
 type Appointment = {
   id: number;
@@ -71,7 +74,8 @@ function AppointmentsView() {
   const [toast, setToast] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [services, setServices] = useState<any[]>([]);
   const [convertDialog, setConvertDialog] = useState<{ open: boolean; id: number | null; sessionType?: string }>({ open: false, id: null });
-  const [convertForm, setConvertForm] = useState({ appointmentDate: "", startTime: "", sessionType: "", mode: "OFFLINE" as "ONLINE" | "OFFLINE" });
+  const [convertForm, setConvertForm] = useState({ appointmentDate: "", startTime: "", endTime: "", sessionType: "", mode: "OFFLINE" as "ONLINE" | "OFFLINE" });
+  const [convertCheck, setConvertCheck] = useState<TimeCheck | null>(null);
 
   // Psyfos: the front-desk booking flow and the end-of-session wrap-up
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -158,21 +162,31 @@ function AppointmentsView() {
   };
 
   const openConvertDialog = (apt: Appointment) => {
-    setConvertForm({ appointmentDate: "", startTime: "", sessionType: apt.sessionType || "", mode: (apt.mode as "ONLINE" | "OFFLINE") || "OFFLINE" });
+    setConvertForm({ appointmentDate: "", startTime: "", endTime: "", sessionType: apt.sessionType || "", mode: (apt.mode as "ONLINE" | "OFFLINE") || "OFFLINE" });
+    setConvertCheck(null);
     setConvertDialog({ open: true, id: apt.id, sessionType: apt.sessionType });
   };
 
+  // The service's own length pre-fills End; the doctor can type any End they like.
+  const convertDefaultMinutes = useMemo(() => {
+    const svc = services.find((s: any) => String(s.id) === convertForm.sessionType);
+    return svc ? parseServiceDuration(svc.duration) : DEFAULT_SESSION_MINUTES;
+  }, [services, convertForm.sessionType]);
+  const convertRangeError = sessionRangeError(convertForm.startTime, convertForm.endTime);
+
   const handleConvert = async () => {
     if (!convertDialog.id) return;
-    if (!convertForm.appointmentDate || !convertForm.startTime) {
-      showToast("Please select a date and time.", "error");
+    if (!convertForm.appointmentDate || !convertForm.startTime || !convertForm.endTime) {
+      showToast("Please select a date, start and end time.", "error");
       return;
     }
+    if (convertRangeError) { showToast(convertRangeError, "error"); return; }
     setActionLoading(true);
     try {
       await api.patch(`/appointments/${convertDialog.id}/convert`, {
         appointmentDate: convertForm.appointmentDate,
         startTime:       convertForm.startTime + ":00",
+        durationMinutes: minutesBetween(convertForm.startTime, convertForm.endTime),
         sessionType:     convertForm.sessionType || null,
         mode:            convertForm.mode,
       });
@@ -180,7 +194,10 @@ function AppointmentsView() {
       setConvertDialog({ open: false, id: null });
       await fetchAppointments();
       if (selected?.id === convertDialog.id) setSelected(null);
-    } catch { showToast("Failed to convert demo call.", "error"); }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message;
+      showToast(typeof msg === "string" && msg.trim() ? msg : "Failed to convert demo call.", "error");
+    }
     setActionLoading(false);
   };
 
@@ -884,12 +901,13 @@ function AppointmentsView() {
                 />
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 8 }}>Time *</label>
-                <input
-                  type="time"
-                  className="nm-input"
-                  value={convertForm.startTime}
-                  onChange={e => setConvertForm(f => ({ ...f, startTime: e.target.value }))}
+                <SessionTimeRange compact
+                  start={convertForm.startTime}
+                  end={convertForm.endTime}
+                  onChange={(s, e) => setConvertForm(f => ({ ...f, startTime: s, endTime: e }))}
+                  defaultMinutes={convertDefaultMinutes}
+                  check={convertForm.appointmentDate ? { date: convertForm.appointmentDate, mode: convertForm.mode } : null}
+                  onCheck={setConvertCheck}
                 />
               </div>
               {services.length > 0 && (
@@ -933,9 +951,9 @@ function AppointmentsView() {
                 Cancel
               </button>
               <button
-                disabled={actionLoading || !convertForm.appointmentDate || !convertForm.startTime}
+                disabled={actionLoading || !convertForm.appointmentDate || !convertForm.startTime || !convertForm.endTime || !!convertRangeError || !!convertCheck?.conflict}
                 onClick={handleConvert}
-                style={{ flex: 1, padding: "12px 20px", borderRadius: 50, background: "#0369a1", color: "#fff", border: "none", cursor: actionLoading ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: (!convertForm.appointmentDate || !convertForm.startTime) ? 0.5 : 1 }}
+                style={{ flex: 1, padding: "12px 20px", borderRadius: 50, background: "#0369a1", color: "#fff", border: "none", cursor: actionLoading ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: (!convertForm.appointmentDate || !convertForm.startTime || !convertForm.endTime || !!convertRangeError || !!convertCheck?.conflict) ? 0.5 : 1 }}
               >
                 {actionLoading ? "Converting…" : "Confirm & Convert"}
               </button>

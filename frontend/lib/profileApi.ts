@@ -22,6 +22,22 @@ export const getMySlots = async (date: string, mode?: 'ONLINE' | 'OFFLINE', staf
     return res.data;
 };
 
+// Live check of a hand-typed start/end: `conflict` is another session the range
+// would overlap (the booking would be refused), `warnings` are soft heads-ups —
+// outside the doctor's hours, a holiday or leave day, or a time already past.
+export interface TimeCheck {
+    conflict: { startTime: string; endTime: string } | null;
+    warnings: string[];
+}
+
+export const getTimeCheck = async (
+    date: string, start: string, end: string, mode?: 'ONLINE' | 'OFFLINE', staffId?: number
+): Promise<TimeCheck> => {
+    const qs = `date=${date}&start=${start}&end=${end}${mode ? `&mode=${mode}` : ''}`;
+    const res = await api.get(staffId ? `/staff/${staffId}/time-check?${qs}` : `/me/time-check?${qs}`);
+    return res.data;
+};
+
 // ── Doctor Services & Pricing ───────────────────────────────────────────────
 
 export interface DoctorServicePrice {
