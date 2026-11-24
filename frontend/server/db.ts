@@ -60,7 +60,7 @@ const CREATED_AND_UPDATED = new Set([
     "subscription", "invoice", "follow_up",
 ]);
 const CREATED_ONLY = new Set([
-    "admin_audit_log", "invoice_payment", "mood_log", "payment_submission", "case_status_log",
+    "admin_audit_log", "invoice_payment", "mood_log", "payment_submission", "case_status_log", "patient_share",
 ]);
 
 export class Db {

@@ -5,6 +5,7 @@ import { isValidDate, minutesToTime, nowTs, timeToMinutes, today } from "../time
 import { AppUser, Appointment, CASE_STATUSES, CaseStatus, CaseStatusLog, FollowUp, Patient, Roles } from "../types";
 import * as appts from "./appointments";
 import { saveNote, SessionNoteDto } from "./notes";
+import { assertCanEditJourney } from "./sharing";
 
 // The Psyfos session lifecycle, layered on top of the existing appointment flow:
 //
@@ -79,10 +80,13 @@ export async function setCaseStatus(
     if (!isCaseStatus(status)) {
         throw badRequest(`Session status must be one of ${CASE_STATUSES.map((s) => CASE_STATUS_LABEL[s]).join(", ")}`);
     }
-    return tx(async (db) => (await changeCaseStatus(db, {
-        tenantId, patientId, toStatus: status, reason: reason && reason.trim() ? reason.trim() : null,
-        appointmentId: null, changedBy: caller.id,
-    })).patient);
+    return tx(async (db) => {
+        await assertCanEditJourney(db, caller, patientId);
+        return (await changeCaseStatus(db, {
+            tenantId, patientId, toStatus: status, reason: reason && reason.trim() ? reason.trim() : null,
+            appointmentId: null, changedBy: caller.id,
+        })).patient;
+    });
 }
 
 export interface CaseStatusLogDto {
@@ -244,6 +248,7 @@ export async function bookFollowUp(
     db: Db, followUpId: number, tenantId: number, caller: AppUser, input: BookFollowUpInput
 ): Promise<FollowUpDto> {
     const f = await requireOwnedFollowUp(db, followUpId, tenantId);
+    await assertCanEditJourney(db, caller, f.patientId);
     if (f.status === "BOOKED") throw conflict("This follow-up already has a session booked.");
     if (f.status === "DONE" || f.status === "CANCELLED") throw conflict(`This follow-up is already ${f.status.toLowerCase()}.`);
 
@@ -276,8 +281,9 @@ export async function bookFollowUp(
     return followUpDto(db, f.id);
 }
 
-export async function updateFollowUp(db: Db, id: number, tenantId: number, body: JsonObject): Promise<FollowUpDto> {
+export async function updateFollowUp(db: Db, id: number, tenantId: number, caller: AppUser, body: JsonObject): Promise<FollowUpDto> {
     const f = await requireOwnedFollowUp(db, id, tenantId);
+    await assertCanEditJourney(db, caller, f.patientId);
     if (f.status !== "PENDING") throw conflict("Only a follow-up that isn't booked yet can be changed here — edit the session instead.");
     const patch: Record<string, unknown> = {};
     if (body.dueDate != null) {
@@ -299,14 +305,16 @@ export async function updateFollowUp(db: Db, id: number, tenantId: number, body:
     return followUpDto(db, id);
 }
 
-export async function markFollowUpDone(db: Db, id: number, tenantId: number): Promise<FollowUpDto> {
-    await requireOwnedFollowUp(db, id, tenantId);
+export async function markFollowUpDone(db: Db, id: number, tenantId: number, caller: AppUser): Promise<FollowUpDto> {
+    const f = await requireOwnedFollowUp(db, id, tenantId);
+    await assertCanEditJourney(db, caller, f.patientId);
     await db.update("follow_up", id, { status: "DONE" });
     return followUpDto(db, id);
 }
 
-export async function cancelFollowUp(db: Db, id: number, tenantId: number): Promise<FollowUpDto> {
+export async function cancelFollowUp(db: Db, id: number, tenantId: number, caller: AppUser): Promise<FollowUpDto> {
     const f = await requireOwnedFollowUp(db, id, tenantId);
+    await assertCanEditJourney(db, caller, f.patientId);
     if (f.status === "BOOKED") {
         throw conflict("A session is already booked for this follow-up — cancel or reschedule that session instead.");
     }
@@ -318,6 +326,7 @@ export async function createFollowUpForClient(
     tenantId: number, caller: AppUser, patientId: number, body: JsonObject
 ): Promise<FollowUpDto> {
     return tx(async (db) => {
+        await assertCanEditJourney(db, caller, patientId);
         const dueDate = body.dueDate;
         if (!isValidDate(dueDate)) throw badRequest("Follow-up date is required (YYYY-MM-DD)");
         const dueTime = body.dueTime ? minutesToTime(timeToMinutes(body.dueTime) ?? 0) : null;
@@ -375,6 +384,7 @@ export async function completeSession(
 
     return tx(async (db) => {
         const appt = await appts.requireOwnedAppointment(db, appointmentId, tenantId);
+        await assertCanEditJourney(db, caller, appt.patientId);
         if (appt.status === "CANCELLED" || appt.status === "DEMO_CALL_PENDING") {
             throw conflict("A cancelled session or a demo-call request can't be completed.");
         }

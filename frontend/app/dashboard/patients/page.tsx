@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo, Suspense } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Users, Search, Phone, Mail, X, UserCircle2, UserPlus, Stethoscope, CalendarPlus } from "lucide-react";
+import { Users, Search, Phone, Mail, X, UserCircle2, UserPlus, Stethoscope, CalendarPlus, Share2 } from "lucide-react";
 import api from "../../../lib/api";
 import { SpotlightLink } from "../../../components/Spotlight";
 import NewBookingWizard from "../../../components/psyfos/NewBookingWizard";
@@ -19,6 +19,8 @@ type Patient = {
   riskFlag?: boolean; riskReason?: string; riskFlaggedAt?: string;
   assignedDoctorId?: number | null;
   caseStatus?: string;
+  // Only on the "My clients" list: the client reached this therapist through a share.
+  sharedWithMe?: boolean; sharedByName?: string | null;
 };
 type Appointment = {
   id: number; patientId?: number | null; patientName: string; patientEmail: string;
@@ -335,7 +337,7 @@ function PatientsView() {
             <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "60px 0" }}>
               <UserCircle2 style={{ width: 48, height: 48, color: "var(--text-3)", margin: "0 auto 12px" }} />
               <p style={{ color: "var(--text-2)", fontWeight: 600 }}>{isTherapist && scope === "mine" && patients.length === 0 ? "No clients on your caseload yet" : "No patients found"}</p>
-              <p style={{ color: "var(--text-3)", fontSize: 13 }}>{isTherapist && scope === "mine" && patients.length === 0 ? "Clients appear here once a session is booked with you." : "Try a different search"}</p>
+              <p style={{ color: "var(--text-3)", fontSize: 13 }}>{isTherapist && scope === "mine" && patients.length === 0 ? "Clients appear here once a session is booked with you, or another therapist shares them with you." : "Try a different search"}</p>
             </div>
           )}
           {filtered.map((patient, i) => {
@@ -367,6 +369,12 @@ function PatientsView() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
                       <p style={{ fontSize: 11, color: "var(--text-3)" }}>ID #{patient.id.toString().padStart(4, "0")}</p>
                       <CaseStatusChip status={patient.caseStatus} size="sm" />
+                      {patient.sharedWithMe && (
+                        <span title={patient.sharedByName ? `Shared with you by ${patient.sharedByName}` : "Shared with you"}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 50, background: "var(--accent-surface)", color: "var(--accent)" }}>
+                          <Share2 style={{ width: 10, height: 10 }} /> Shared with you
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

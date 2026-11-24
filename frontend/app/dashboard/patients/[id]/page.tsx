@@ -11,6 +11,7 @@ import {
   Download, Plus, BrainCircuit, TrendingUp, Star,
   Lock, Pencil, Save, Trash2, DollarSign, Smile, X, RefreshCw,
   Paperclip, Loader2, UploadCloud, Video, MapPin, Stethoscope, Activity, CalendarClock, CalendarCheck,
+  Share2, Users, Eye,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -27,7 +28,8 @@ import CaseStatusModal from "../../../../components/psyfos/CaseStatusModal";
 import SetFollowUpModal from "../../../../components/psyfos/SetFollowUpModal";
 import FollowUpBookModal from "../../../../components/psyfos/FollowUpBookModal";
 import NewBookingWizard from "../../../../components/psyfos/NewBookingWizard";
-import { caseStatusMeta, fmtDay as psyFmtDay, fmtTime as psyFmtTime, relativeDay as psyRelativeDay, type FollowUp as PsyFollowUp } from "../../../../lib/psyfos";
+import ShareClientModal from "../../../../components/psyfos/ShareClientModal";
+import { caseStatusMeta, fmtDay as psyFmtDay, fmtTime as psyFmtTime, relativeDay as psyRelativeDay, type FollowUp as PsyFollowUp, type ShareState } from "../../../../lib/psyfos";
 import { getMySlots, getMyServices, getAvailabilityBlocks, DoctorServicePrice, AvailabilityBlock, TimeCheck } from "../../../../lib/profileApi";
 import {
   MIN_SESSION_MINUTES, MAX_SESSION_MINUTES, DEFAULT_SESSION_MINUTES,
@@ -312,6 +314,19 @@ export default function ClientTimelinePage() {
     api.get(`/patients/${params.id}/case-history`).then(r => setCaseInfo(r.data)).catch(() => {});
   };
   useEffect(() => { loadCaseInfo(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params.id]);
+
+  // Client sharing: how the signed-in user relates to this client (and so whether
+  // the journey is editable or read-only for them) and who it's shared with. If the
+  // call fails the page behaves as it always did — the server still enforces access.
+  const [shareState, setShareState] = useState<ShareState | null>(null);
+  const [shareModal, setShareModal] = useState(false);
+  useEffect(() => {
+    if (!params.id) return;
+    api.get(`/patients/${params.id}/shares`).then(r => setShareState(r.data)).catch(() => setShareState(null));
+  }, [params.id]);
+  const canEdit = shareState ? shareState.canEdit : true;
+  const canDelete = shareState ? shareState.canDelete : true;
+  const canShare = !!shareState?.canManage && (shareState.candidates.length > 0 || shareState.shares.length > 0);
 
   // Roster of bookable psychologists in this clinic, for the doctor picker
   // on the Schedule/Add Session modals below. GET /staff only succeeds for
@@ -1113,6 +1128,39 @@ export default function ClientTimelinePage() {
         </div>
       )}
       
+      {/* Sharing: how this client reached you, or why the journey is read-only */}
+      {shareState?.access === "SHARED" && (() => {
+        const mine = shareState.shares.find(s => s.therapistId === ownUser?.id);
+        return (
+          <div style={{ padding: "12px 18px", borderRadius: 16, background: "var(--accent-surface)", border: "1px solid var(--card-border)", display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: "var(--text-2)" }}>
+            <Share2 style={{ width: 16, height: 16, color: "var(--accent)", flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>
+              {mine?.sharedByName ? <><strong style={{ color: "var(--text-1)" }}>{mine.sharedByName}</strong> shared this client with you.</> : "This client was shared with you."}{" "}
+              You can update their session status, follow-ups and notes.
+            </span>
+            <button type="button" className="btn-nm" style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, flexShrink: 0 }}
+              onClick={async () => {
+                if (!ownUser || !confirm("Stop following this client? You'll no longer see them under My clients.")) return;
+                try { await api.delete(`/patients/${patient.id}/shares/${ownUser.id}`); router.push("/dashboard/patients"); }
+                catch { alert("Couldn't remove your access. Please try again."); }
+              }}>
+              Leave
+            </button>
+          </div>
+        );
+      })()}
+      {shareState?.access === "NONE" && (
+        <div style={{ padding: "12px 18px", borderRadius: 16, background: "var(--warning-bg)", border: "1px solid var(--card-border)", display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: "var(--text-2)" }}>
+          <Eye style={{ width: 16, height: 16, color: "var(--warning)", flexShrink: 0 }} />
+          <span>
+            <strong style={{ color: "var(--text-1)" }}>View only.</strong> This client isn&apos;t on your caseload, so you can&apos;t change their journey.
+            {shareState.treatingTherapists.length > 0
+              ? <> Ask {shareState.treatingTherapists.join(" or ")} or the clinic owner to share them with you.</>
+              : <> Ask the clinic owner to share them with you.</>}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
@@ -1132,26 +1180,38 @@ export default function ClientTimelinePage() {
         </div>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button onClick={openNoteModal} className="btn-nm"
-            style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
-            <Plus style={{ width: 15, height: 15, color: "var(--accent)" }} /> Add Note
-          </button>
-          <button onClick={isPractitioner ? openScheduleModal : () => setWizardOpen(true)} className="btn-nm"
-            style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
-            <Calendar style={{ width: 15, height: 15, color: "var(--accent)" }} /> Schedule
-          </button>
-          <button onClick={openPastModal} className="btn-nm"
-            style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
-            <RefreshCw style={{ width: 15, height: 15, color: "var(--accent)" }} /> Add Session
-          </button>
-          <button
-            onClick={handleDeletePatient}
-            className="btn-nm"
-            style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--danger)" }}
-          >
-            <Trash2 style={{ width: 15, height: 15 }} /> Delete
-          </button>
-          <button
+          {canShare && (
+            <button onClick={() => setShareModal(true)} className="btn-nm"
+              style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
+              <Share2 style={{ width: 15, height: 15, color: "var(--accent)" }} /> Share
+            </button>
+          )}
+          {canEdit && (
+            <>
+              <button onClick={openNoteModal} className="btn-nm"
+                style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
+                <Plus style={{ width: 15, height: 15, color: "var(--accent)" }} /> Add Note
+              </button>
+              <button onClick={isPractitioner ? openScheduleModal : () => setWizardOpen(true)} className="btn-nm"
+                style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
+                <Calendar style={{ width: 15, height: 15, color: "var(--accent)" }} /> Schedule
+              </button>
+              <button onClick={openPastModal} className="btn-nm"
+                style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--text-1)" }}>
+                <RefreshCw style={{ width: 15, height: 15, color: "var(--accent)" }} /> Add Session
+              </button>
+            </>
+          )}
+          {canDelete && (
+            <button
+              onClick={handleDeletePatient}
+              className="btn-nm"
+              style={{ padding: "10px 16px", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--danger)" }}
+            >
+              <Trash2 style={{ width: 15, height: 15 }} /> Delete
+            </button>
+          )}
+          {canEdit && <button
             onClick={() => {
               if (patient.riskFlag) {
                 if (confirm("Are you sure you want to clear the risk flag?")) handleToggleRisk();
@@ -1164,10 +1224,14 @@ export default function ClientTimelinePage() {
           >
             <AlertCircle style={{ width: 15, height: 15 }} />
             {patient.riskFlag ? "Clear Risk Flag" : "Flag as High Risk"}
-          </button>
+          </button>}
         </div>
       </div>
 
+      {shareModal && shareState && (
+        <ShareClientModal patient={{ id: patient.id, name: patient.name }} state={shareState}
+          onClose={() => setShareModal(false)} onChanged={setShareState} />
+      )}
       {caseModal && (
         <CaseStatusModal patient={{ id: patient.id, name: patient.name, caseStatus: patient.caseStatus }} onClose={() => setCaseModal(false)}
           onSaved={(updated) => { setCaseModal(false); setPatient(prev => prev ? { ...prev, ...updated } : prev); loadCaseInfo(); }} />
@@ -1199,6 +1263,55 @@ export default function ClientTimelinePage() {
         {/* Left Column: Patient Info & Metrics */}
         <div style={{ display: "flex", flexDirection: "column", gap: 24, position: "sticky", top: 24 }}>
           
+          {/* Care team — who treats this client, and who else it's shared with (shown to anyone who can see the profile) */}
+          {shareState && (shareState.shares.length > 0 || canShare) && (
+            <div className="soft-card" style={{ borderRadius: 24, padding: 28 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Users style={{ width: 16, height: 16, color: "var(--accent)" }} /> Care team
+                </h3>
+                {canShare && (
+                  <button onClick={() => setShareModal(true)} className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)" }}>
+                    <Share2 style={{ width: 12, height: 12 }} /> {shareState.shares.length ? "Manage" : "Share"}
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {shareState.treating.map(t => (
+                  <div key={`t${t.id}`} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div className="team-avatar" style={{ width: 32, height: 32, borderRadius: "50%", fontSize: 13, flexShrink: 0 }}>
+                      {(t.name ?? "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name ?? "Therapist"}{t.isMe ? " (you)" : ""}</p>
+                      <p style={{ fontSize: 11, color: "var(--text-3)" }}>{t.jobTitle ?? "Therapist"}</p>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 50, background: "var(--accent-surface)", color: "var(--accent)", flexShrink: 0 }}>
+                      {t.assigned ? "Primary" : "Treating"}
+                    </span>
+                  </div>
+                ))}
+                {shareState.shares.map(s => (
+                  <div key={`s${s.therapistId}`} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div className="team-avatar" style={{ width: 32, height: 32, borderRadius: "50%", fontSize: 13, flexShrink: 0 }}>
+                      {(s.therapistName ?? "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.therapistName ?? "Therapist"}{s.therapistId === ownUser?.id ? " (you)" : ""}</p>
+                      <p style={{ fontSize: 11, color: "var(--text-3)" }}>
+                        {s.sharedByName ? `Shared by ${s.sharedByName}` : "Shared"}{s.sharedAt ? ` · ${psyFmtDay(s.sharedAt.slice(0, 10), { day: "numeric", month: "short" })}` : ""}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 50, background: "var(--glass)", color: "var(--text-2)", flexShrink: 0 }}>Shared</span>
+                  </div>
+                ))}
+                {shareState.shares.length === 0 && (
+                  <p style={{ fontSize: 12.5, color: "var(--text-3)" }}>Not shared with any other therapist.</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ONE-CLICK SESSION SUMMARY CARD */}
           {metrics && (
             <div id="summary-card" className="soft-card" style={{ borderRadius: 24, padding: 32, display: "flex", flexDirection: "column", gap: 24 }}>
@@ -1258,11 +1371,13 @@ export default function ClientTimelinePage() {
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text-1)", marginBottom: 4 }}>{patient.name}</h2>
             <p style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 16, fontFamily: "monospace" }}>ID: {patient.id.toString().padStart(5, "0")}</p>
 
-            <button onClick={() => { setEditPatientForm({ name: patient.name, email: patient.email || "", phone: patient.phone || "" }); setEditPatientOpen(true); }}
-              className="icon-btn" title="Edit Details"
-              style={{ width: 34, height: 34, borderRadius: "50%", color: "var(--accent)", marginBottom: 16 }}>
-              <Pencil style={{ width: 14, height: 14 }} />
-            </button>
+            {canEdit ? (
+              <button onClick={() => { setEditPatientForm({ name: patient.name, email: patient.email || "", phone: patient.phone || "" }); setEditPatientOpen(true); }}
+                className="icon-btn" title="Edit Details"
+                style={{ width: 34, height: 34, borderRadius: "50%", color: "var(--accent)", marginBottom: 16 }}>
+                <Pencil style={{ width: 14, height: 14 }} />
+              </button>
+            ) : <div style={{ height: 4 }} />}
 
             <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="soft-card-2" style={{ borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: "var(--text-2)" }}>
@@ -1299,9 +1414,11 @@ export default function ClientTimelinePage() {
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: 8 }}>
                     <Activity style={{ width: 16, height: 16, color: "var(--accent)" }} /> Session status
                   </h3>
-                  <button onClick={() => setCaseModal(true)} className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)" }}>
-                    <Pencil style={{ width: 12, height: 12 }} /> Update
-                  </button>
+                  {canEdit && (
+                    <button onClick={() => setCaseModal(true)} className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)" }}>
+                      <Pencil style={{ width: 12, height: 12 }} /> Update
+                    </button>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <CaseStatusChip status={patient.caseStatus} />
@@ -1328,7 +1445,7 @@ export default function ClientTimelinePage() {
                         {openFu.status === "BOOKED" ? "Session booked" : "Date set — not booked yet"}
                       </p>
                       {openFu.note && <p style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6, fontStyle: "italic" }}>“{openFu.note}”</p>}
-                      {openFu.status === "PENDING" && (
+                      {openFu.status === "PENDING" && canEdit && (
                         <button onClick={() => setBookFollow(openFu)} className="btn-nm-accent" style={{ marginTop: 12, padding: "7px 16px", fontSize: 12, fontWeight: 700, gap: 6 }}>
                           <CalendarCheck style={{ width: 13, height: 13 }} /> Book session
                         </button>
@@ -1337,9 +1454,11 @@ export default function ClientTimelinePage() {
                   ) : meta.open ? (
                     <>
                       <p style={{ fontSize: 13, color: "var(--text-3)" }}>None scheduled.</p>
-                      <button onClick={() => setFollowModal(true)} className="btn-nm" style={{ marginTop: 10, padding: "7px 14px", fontSize: 12, fontWeight: 700, gap: 6, color: "var(--accent)" }}>
-                        <Plus style={{ width: 13, height: 13 }} /> Schedule next follow-up
-                      </button>
+                      {canEdit && (
+                        <button onClick={() => setFollowModal(true)} className="btn-nm" style={{ marginTop: 10, padding: "7px 14px", fontSize: 12, fontWeight: 700, gap: 6, color: "var(--accent)" }}>
+                          <Plus style={{ width: 13, height: 13 }} /> Schedule next follow-up
+                        </button>
+                      )}
                     </>
                   ) : (
                     <p style={{ fontSize: 13, color: "var(--text-3)" }}>Not needed — this case is {meta.label.toLowerCase()}.</p>
@@ -1367,7 +1486,7 @@ export default function ClientTimelinePage() {
               <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: 8 }}>
                 <Paperclip style={{ width: 16, height: 16, color: "var(--accent)" }} /> Attachments
               </h3>
-              <label className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)", cursor: uploadingFile ? "default" : "pointer" }}>
+              {canEdit && <label className="btn-nm" style={{ padding: "7px 14px", gap: 6, fontWeight: 600, fontSize: 12, color: "var(--accent)", cursor: uploadingFile ? "default" : "pointer" }}>
                 {uploadingFile ? (
                   <Loader2 style={{ width: 13, height: 13, animation: "spinSlow 1s linear infinite" }} />
                 ) : (
@@ -1384,7 +1503,7 @@ export default function ClientTimelinePage() {
                     if (file) handleUploadAttachment(file);
                   }}
                 />
-              </label>
+              </label>}
             </div>
 
             {attachmentError && (
@@ -1416,17 +1535,19 @@ export default function ClientTimelinePage() {
                         ? <Loader2 style={{ width: 14, height: 14, animation: "spinSlow 1s linear infinite" }} />
                         : <Download style={{ width: 14, height: 14 }} />}
                     </button>
-                    <button
-                      onClick={() => handleDeleteAttachment(att.id)}
-                      disabled={deletingAttachmentId === att.id}
-                      className="icon-btn"
-                      title="Delete"
-                      style={{ color: "var(--danger)" }}
-                    >
-                      {deletingAttachmentId === att.id
-                        ? <Loader2 style={{ width: 14, height: 14, animation: "spinSlow 1s linear infinite" }} />
-                        : <Trash2 style={{ width: 14, height: 14 }} />}
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => handleDeleteAttachment(att.id)}
+                        disabled={deletingAttachmentId === att.id}
+                        className="icon-btn"
+                        title="Delete"
+                        style={{ color: "var(--danger)" }}
+                      >
+                        {deletingAttachmentId === att.id
+                          ? <Loader2 style={{ width: 14, height: 14, animation: "spinSlow 1s linear infinite" }} />
+                          : <Trash2 style={{ width: 14, height: 14 }} />}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1637,7 +1758,7 @@ export default function ClientTimelinePage() {
                             <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700, color: st.textColor, background: `${st.textColor}15`, padding: "6px 12px", borderRadius: 10 }}>
                             {st.icon} {st.label}
                           </div>
-                          <button
+                          {canEdit && <button
                             onClick={() => {
                               setEditSessionId(apt.id);
                               setEditSessionForm({
@@ -1659,14 +1780,14 @@ export default function ClientTimelinePage() {
                             title="Edit session"
                           >
                             <Pencil style={{ width: 14, height: 14 }} />
-                          </button>
-                          <button
+                          </button>}
+                          {canEdit && <button
                             onClick={() => handleDeleteSession(apt.id)}
                             className="icon-btn"
                             title="Delete session"
                           >
                             <Trash2 style={{ width: 14, height: 14 }} />
-                          </button>
+                          </button>}
                         </div>
                       </div>
 
@@ -1751,7 +1872,7 @@ export default function ClientTimelinePage() {
                             <p style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
                               <Lock style={{ width: 11, height: 11 }} /> Private Clinical Notes (SOAP)
                             </p>
-                            {editingNoteId !== apt.id && (
+                            {editingNoteId !== apt.id && canEdit && (
                               <button onClick={() => {
                                 setEditingNoteId(apt.id);
                                 const existing = sessionNotes[apt.id];

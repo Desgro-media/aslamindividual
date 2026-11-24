@@ -111,6 +111,31 @@ export interface ServiceOption {
   }>;
 }
 
+// Client sharing: who may edit a client's journey, and who it's shared with.
+export interface ClientShare {
+  therapistId: number; therapistName: string | null; therapistJobTitle: string | null;
+  sharedById: number | null; sharedByName: string | null; sharedAt: string | null;
+}
+
+export interface ShareCandidate { id: number; name: string | null; jobTitle: string | null; shared: boolean }
+
+/** A therapist who works with the client in their own right (assigned, or has a session with them). */
+export interface TreatingTherapist {
+  id: number; name: string | null; jobTitle: string | null; enabled: boolean; assigned: boolean; isMe: boolean;
+}
+
+export interface ShareState {
+  /** how the signed-in user relates to the client; NONE = a clinic therapist with no access (read-only) */
+  access: "OWNER" | "TREATING" | "SHARED" | "NONE" | "OTHER";
+  canEdit: boolean;
+  canManage: boolean;
+  canDelete: boolean;
+  treating: TreatingTherapist[];
+  shares: ClientShare[];
+  candidates: ShareCandidate[];
+  treatingTherapists: string[];
+}
+
 export type FollowUpBucket = "OVERDUE" | "TODAY" | "UPCOMING" | "BOOKED" | "DONE" | "CANCELLED";
 
 export interface FollowUp {

@@ -256,6 +256,100 @@ async function main() {
     const badStatus = await call("PATCH", `/patients/${patientId}/case-status`, { token: therapist, body: { caseStatus: "WHATEVER" } });
     check("unknown session status is rejected (400)", badStatus.status === 400, badStatus.data);
 
+    section("Client sharing: a therapist shares a client with another therapist");
+    const raviEmail = `ravi-${run}@psyfos.test`;
+    const ravi = await call("POST", "/staff", {
+        token: owner,
+        body: { name: "Ravi Iyer", username: raviEmail, password: "Therapist#123", role: "ROLE_PSYCHOLOGIST", jobTitle: "Career Counsellor", bookable: false, permissions: [] },
+    });
+    check("second therapist created", ravi.status === 200 && ravi.data?.role === "ROLE_PSYCHOLOGIST", ravi);
+    const raviId = ravi.data.id as number;
+    const ownerId = (signup.data?.id ?? me.data?.id) as number;
+    const raviTok = (await call("POST", "/auth/login", { body: { email: raviEmail, password: "Therapist#123" } })).data?.token as string;
+    const shares = (token: string) => call("GET", `/patients/${patientId}/shares`, { token });
+
+    // Before sharing: Ravi has no relationship with this client, so it is read-only for him.
+    const none = await shares(raviTok);
+    check("an unshared therapist is read-only (state NONE) and is told who to ask",
+        none.data?.access === "NONE" && none.data?.canEdit === false && none.data?.canManage === false && none.data?.canDelete === false
+        && none.data?.treatingTherapists?.includes("Dr. Asha Menon"), none.data);
+    check("...the client isn't in his My Clients", !(await call("GET", "/me/clients", { token: raviTok })).data?.some((c: any) => c.id === patientId));
+    check("...case history is refused (403)", (await call("GET", `/me/case-history/${patientId}`, { token: raviTok })).status === 403);
+    check("...changing the session status is refused (403)", (await call("PATCH", `/patients/${patientId}/case-status`, { token: raviTok, body: { caseStatus: "ONGOING" } })).status === 403);
+    check("...writing a session note is refused (403)", (await call("POST", "/notes", { token: raviTok, body: { appointmentId: apptId, plan: "x" } })).status === 403);
+    check("...setting a follow-up is refused (403)", (await call("POST", `/patients/${patientId}/follow-up`, { token: raviTok, body: { dueDate: addDays(followDate, 60) } })).status === 403);
+    check("...flagging risk is refused (403)", (await call("PATCH", `/patients/${patientId}/risk-flag`, { token: raviTok, body: { riskFlag: true, riskReason: "x" } })).status === 403);
+    check("...deleting the client is refused (403)", (await call("DELETE", `/patients/${patientId}`, { token: raviTok })).status === 403);
+    check("...and he can't share a client he has no access to (403)", (await call("POST", `/patients/${patientId}/shares`, { token: raviTok, body: { therapistId: raviId } })).status === 403);
+
+    // The treating therapist shares the client.
+    const mineState = await shares(therapist);
+    check("the treating therapist can manage sharing; Ravi is offered, the owner is not",
+        mineState.data?.access === "TREATING" && mineState.data?.canManage === true && mineState.data?.canDelete === true
+        && mineState.data?.treating?.some((x: any) => x.id === therapistId && x.isMe === true)
+        && mineState.data?.candidates?.some((x: any) => x.id === raviId && x.shared === false)
+        && !mineState.data?.candidates?.some((x: any) => x.id === ownerId), mineState.data);
+    check("sharing with yourself is refused (400)", (await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: { therapistId } })).status === 400);
+    check("sharing with the clinic owner is refused (400)", (await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: { therapistId: ownerId } })).status === 400);
+    check("sharing with a non-therapist is refused (404)", (await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: { therapistId: r.data.id } })).status === 404);
+    check("sharing without a therapist id is refused (400)", (await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: {} })).status === 400);
+    const shared = await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: { therapistId: raviId } });
+    check("client shared with Ravi, attributed to the sharer",
+        shared.status === 200 && shared.data?.shares?.length === 1 && shared.data.shares[0].therapistId === raviId && shared.data.shares[0].sharedByName === "Dr. Asha Menon", shared.data);
+    const again = await call("POST", `/patients/${patientId}/shares`, { token: therapist, body: { therapistId: raviId } });
+    check("sharing twice is harmless (still one share)", again.status === 200 && again.data?.shares?.length === 1, again.data);
+
+    // After sharing: Ravi can edit the client's journey, but can't re-share or delete.
+    const sharedState = await shares(raviTok);
+    check("the shared therapist can edit but not manage or delete",
+        sharedState.data?.access === "SHARED" && sharedState.data?.canEdit === true && sharedState.data?.canManage === false && sharedState.data?.canDelete === false, sharedState.data);
+    const raviClient = (await call("GET", "/me/clients", { token: raviTok })).data?.find((c: any) => c.id === patientId);
+    check("the client now shows in his My Clients, flagged as shared by Asha", raviClient?.sharedWithMe === true && raviClient?.sharedByName === "Dr. Asha Menon", raviClient);
+    check("...while the sharer still sees the client as her own (not marked shared)", (await call("GET", "/me/clients", { token: therapist })).data?.find((c: any) => c.id === patientId)?.sharedWithMe === false);
+    check("he can open the case history", (await call("GET", `/me/case-history/${patientId}`, { token: raviTok })).status === 200);
+    const raviStatus = await call("PATCH", `/patients/${patientId}/case-status`, { token: raviTok, body: { caseStatus: "ONGOING", reason: "Resumed after a break" } });
+    check("he can change the session status", raviStatus.status === 200 && raviStatus.data?.caseStatus === "ONGOING", raviStatus.data);
+    const raviLog = (await call("GET", `/me/case-history/${patientId}`, { token: raviTok })).data?.statusLog;
+    check("...and the change is attributed to him", raviLog?.some((l: any) => l.toStatus === "ONGOING" && l.changedByName === "Ravi Iyer"), raviLog);
+    const raviNote = await call("POST", "/notes", { token: raviTok, body: { appointmentId: apptId, plan: "Add a monthly review" } });
+    check("he can write a session note", raviNote.status === 200 && raviNote.data?.plan === "Add a monthly review", raviNote.data);
+    // 409 (not 403) = the request got past the access check; a follow-up is already booked for this client.
+    check("he can set follow-ups (passes the access check)", (await call("POST", `/patients/${patientId}/follow-up`, { token: raviTok, body: { dueDate: addDays(followDate, 60) } })).status === 409);
+    check("he can flag risk and edit details",
+        (await call("PATCH", `/patients/${patientId}/risk-flag`, { token: raviTok, body: { riskFlag: true, riskReason: "x" } })).status === 200
+        && (await call("PATCH", `/patients/${patientId}/details`, { token: raviTok, body: { email: "meera.n@example.com" } })).status === 200);
+    await call("PATCH", `/patients/${patientId}/risk-flag`, { token: raviTok, body: { riskFlag: false } });
+    check("he can't re-share the client onward (403)", (await call("POST", `/patients/${patientId}/shares`, { token: raviTok, body: { therapistId } })).status === 403);
+    check("he can't remove someone else's access (403)", (await call("DELETE", `/patients/${patientId}/shares/${therapistId}`, { token: raviTok })).status === 403);
+    check("he can't delete the client (403)", (await call("DELETE", `/patients/${patientId}`, { token: raviTok })).status === 403);
+
+    // He can leave; access goes away with it.
+    const left = await call("DELETE", `/patients/${patientId}/shares/${raviId}`, { token: raviTok });
+    check("a shared therapist can leave", left.status === 200 && left.data?.access === "NONE", left.data);
+    check("...and is locked out again (403)", (await call("PATCH", `/patients/${patientId}/case-status`, { token: raviTok, body: { caseStatus: "DROPPED" } })).status === 403);
+
+    // The owner can do all of it, for any client.
+    const ownerState = await shares(owner);
+    check("the owner sees the care team and can manage sharing",
+        ownerState.data?.access === "OWNER" && ownerState.data?.canManage === true && ownerState.data?.treating?.some((x: any) => x.id === therapistId), ownerState.data);
+    check("the owner shares the client with Ravi", (await call("POST", `/patients/${patientId}/shares`, { token: owner, body: { therapistId: raviId } })).data?.shares?.length === 1);
+    check("...he can edit again", (await call("PATCH", `/patients/${patientId}/case-status`, { token: raviTok, body: { caseStatus: "PERIODIC_FOLLOW_UP" } })).status === 200);
+    check("the owner removes his access", (await call("DELETE", `/patients/${patientId}/shares/${raviId}`, { token: owner })).data?.shares?.length === 0);
+    check("...and he's locked out (403)", (await call("PATCH", `/patients/${patientId}/case-status`, { token: raviTok, body: { caseStatus: "ONGOING" } })).status === 403);
+    // put the client back as the rest of this run expects (closed case)
+    await call("PATCH", `/patients/${patientId}/case-status`, { token: owner, body: { caseStatus: "TERMINATED", reason: "Goals achieved" } });
+
+    // Front-desk staff are not restricted by caseloads.
+    const recState = await shares(reception);
+    check("the receptionist is unaffected: can still edit, can't manage sharing", recState.data?.access === "OTHER" && recState.data?.canEdit === true && recState.data?.canManage === false, recState.data);
+    check("a client id from nowhere is a 404", (await call("GET", "/patients/99999999/shares", { token: therapist })).status === 404);
+
+    // Removing a therapist who still holds a share must work and take the share with it.
+    await call("POST", `/patients/${patientId}/shares`, { token: owner, body: { therapistId: raviId } });
+    const delRavi = await call("DELETE", `/staff/${raviId}?permanent=true`, { token: owner });
+    check("deleting a therapist who holds a share works", delRavi.status === 204, delRavi);
+    check("...and the share goes with them", (await shares(owner)).data?.shares?.length === 0);
+
     section("Reports");
     const rep = await call("GET", `/reports/monthly?month=${monday.slice(0, 7)}`, { token: owner });
     check("monthly management report builds", rep.status === 200 && rep.data?.scope === "CLINIC" && rep.data?.sessions && rep.data?.revenue && Array.isArray(rep.data?.byTherapist), rep.data);
