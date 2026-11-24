@@ -17,7 +17,7 @@ import { ModeBadge, SessionStatusBadge, useServiceNames } from "../../../compone
 // One timeline per client — every session with its notes, every change of
 // session status, and every follow-up — newest first.
 
-type ClientRow = { id: number; name: string; phone?: string | null; caseStatus: CaseStatus; riskFlag?: boolean };
+type ClientRow = { id: number; name: string; phone?: string | null; caseStatus: CaseStatus; riskFlag?: boolean; sharedByName?: string | null; sharedWithMe?: boolean };
 
 type TimelineEvent =
   | { kind: "session"; at: string; s: any }
@@ -49,7 +49,7 @@ function CaseHistoryView() {
       staffDoctor = !!u?.tenantId && u?.role === "ROLE_PSYCHOLOGIST";
     } catch { /* clinic-wide list */ }
     api.get(staffDoctor ? "/me/clients" : "/patients")
-      .then(r => setClients((r.data ?? []).map((c: any) => ({ id: c.id, name: c.name, phone: c.phone, caseStatus: c.caseStatus ?? "NEW_CASE", riskFlag: c.riskFlag }))))
+      .then(r => setClients((r.data ?? []).map((c: any) => ({ id: c.id, name: c.name, phone: c.phone, caseStatus: c.caseStatus ?? "NEW_CASE", riskFlag: c.riskFlag, sharedWithMe: c.sharedWithMe, sharedByName: c.sharedByName }))))
       .catch(() => setClients([]))
       .finally(() => setLoadingList(false));
   }, []);
@@ -112,7 +112,15 @@ function CaseHistoryView() {
                   <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {c.riskFlag && "🚨 "}{c.name}
                   </p>
-                  <CaseStatusChip status={c.caseStatus} size="sm" />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <CaseStatusChip status={c.caseStatus} size="sm" />
+                    {c.sharedWithMe && (
+                      <span title={c.sharedByName ? `Shared with you by ${c.sharedByName}` : "Shared with you"}
+                        style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 50, background: "var(--accent-surface)", color: "var(--accent)" }}>
+                        Shared
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             ))}

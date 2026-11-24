@@ -4,6 +4,7 @@ import { nowMinutes, today } from "../time";
 import { AppUser, CaseStatus, Patient, Roles, SessionNote } from "../types";
 import { APPT_PATIENT_SQL, AppointmentDto, toDtos } from "./appointments";
 import { getDoctorOfferedServices } from "./availability";
+import { clientAccess, OWN_CLIENT_SQL, SHARED_CLIENT_SQL } from "./sharing";
 import { FollowUpDto, getCaseStatusLog, listFollowUps, CaseStatusLogDto } from "./workflow";
 
 // Everything a therapist's own dashboard needs — Schedule, My Clients, Case
@@ -17,10 +18,9 @@ const tenantOf = (u: AppUser) => u.tenantId ?? u.id;
 /** A solo practitioner is the only person seeing patients, so every client is "theirs". */
 const isSolo = (u: AppUser) => u.tenantId === null && u.accountType !== "CLINIC";
 
-// SQL predicate: "this patient is one of my clients" ($1 = tenant, $2 = me).
-const MY_CLIENT = `(p.primary_psychologist_id = $1 AND (p.assigned_doctor_id = $2 OR EXISTS (
-        SELECT 1 FROM appointment ax WHERE ax.patient_id = p.id AND ax.assigned_doctor_id = $2
-           AND ax.status NOT IN ('CANCELLED', 'DEMO_CALL_PENDING'))))`;
+// SQL predicate: "this patient is one of my clients" ($1 = tenant, $2 = me) —
+// assigned to me, I have a session with them, or another therapist shared them with me.
+const MY_CLIENT = `(p.primary_psychologist_id = $1 AND (${OWN_CLIENT_SQL} OR ${SHARED_CLIENT_SQL}))`;
 const SOLO_CLIENT = `(p.primary_psychologist_id = $1 AND $2::bigint IS NOT NULL)`;
 
 export const myClientPredicate = (me: AppUser) => (isSolo(me) ? SOLO_CLIENT : MY_CLIENT);
@@ -67,6 +67,8 @@ export interface MyClient {
     sessionsWithMe: number; completedWithMe: number; lastSessionDate: string | null;
     nextAppointmentDate: string | null; nextAppointmentTime: string | null;
     nextFollowUpDate: string | null; nextFollowUpStatus: string | null; pendingNotes: number;
+    /** true when the client reached me only through a share (not assigned, no session with me) */
+    sharedWithMe: boolean; sharedByName: string | null;
 }
 
 export async function getMyClients(db: Db, me: AppUser): Promise<MyClient[]> {
@@ -91,7 +93,10 @@ export async function getMyClients(db: Db, me: AppUser): Promise<MyClient[]> {
                   ORDER BY f.due_date LIMIT 1) AS next_follow_up_status,
                 (SELECT count(*) FROM appointment a WHERE a.patient_id = p.id AND a.assigned_doctor_id = $2
                     AND a.status = 'COMPLETED'
-                    AND NOT EXISTS (SELECT 1 FROM session_note n WHERE n.appointment_id = a.id)) AS pending_notes
+                    AND NOT EXISTS (SELECT 1 FROM session_note n WHERE n.appointment_id = a.id)) AS pending_notes,
+                (${SHARED_CLIENT_SQL} AND NOT ${OWN_CLIENT_SQL}) AS shared_with_me,
+                (SELECT u.name FROM patient_share ps LEFT JOIN app_user u ON u.id = ps.shared_by
+                  WHERE ps.patient_id = p.id AND ps.shared_with_id = $2 LIMIT 1) AS shared_by_name
            FROM patient p
           WHERE ${myClientPredicate(me)}
           ORDER BY p.name ASC`,
@@ -147,15 +152,13 @@ export async function getMySessionNotes(db: Db, me: AppUser): Promise<MySessionN
 
 // ── Case history ─────────────────────────────────────────────────────────────
 
-/** Whether this practitioner may open the client's case history. */
+/**
+ * Whether this practitioner may open the client's case history: the owner / a solo
+ * practitioner (whole roster), the client's own therapist, or a therapist the
+ * client has been shared with.
+ */
 export async function canAccessClient(db: Db, me: AppUser, patient: Patient): Promise<boolean> {
-    if (patient.primaryPsychologistId !== tenantOf(me)) return false;
-    if (me.tenantId === null) return true; // the owner / a solo practitioner sees the whole roster
-    if (patient.assignedDoctorId === me.id) return true;
-    const seen = await db.one(
-        "SELECT 1 FROM appointment WHERE patient_id = $1 AND assigned_doctor_id = $2 AND status NOT IN ('CANCELLED', 'DEMO_CALL_PENDING') LIMIT 1",
-        [patient.id, me.id]);
-    return !!seen;
+    return (await clientAccess(db, me, patient)) !== null;
 }
 
 export interface CaseHistory {

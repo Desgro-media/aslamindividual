@@ -2,9 +2,10 @@ import type { Db } from "../db";
 import { tx } from "../db";
 import { JsonObject, badRequest, isBlank, notFound, optBool } from "../http";
 import { nowTs } from "../time";
-import { Patient } from "../types";
+import { AppUser, Patient } from "../types";
 import { config } from "../config";
 import { resolveTenantStaffId } from "./staffResolution";
+import { assertCanDeleteClient, assertCanEditJourney } from "./sharing";
 
 // ── Patients ─────────────────────────────────────────────────────────────────
 
@@ -60,9 +61,10 @@ export async function createPatient(db: Db, body: JsonObject, ownerId: number): 
 }
 
 export async function updatePatientDetails(
-    db: Db, id: number, ownerId: number, name: string | null, email: string | null, phone: string | null
+    db: Db, id: number, ownerId: number, caller: AppUser, name: string | null, email: string | null, phone: string | null
 ): Promise<Patient> {
     await getPatientById(db, id, ownerId);
+    await assertCanEditJourney(db, caller, id);
     return db.update<Patient>("patient", id, {
         name: name !== null && name.trim() ? name.trim() : undefined,
         email: email !== null ? (email.trim() === "" ? null : email.trim()) : undefined,
@@ -70,16 +72,18 @@ export async function updatePatientDetails(
     });
 }
 
-export async function updateRiskFlag(db: Db, id: number, ownerId: number, riskFlag: boolean, riskReason: string | null): Promise<Patient> {
+export async function updateRiskFlag(db: Db, id: number, ownerId: number, caller: AppUser, riskFlag: boolean, riskReason: string | null): Promise<Patient> {
     await getPatientById(db, id, ownerId);
+    await assertCanEditJourney(db, caller, id);
     return db.update<Patient>("patient", id, riskFlag
         ? { riskFlag: true, riskReason, riskFlaggedAt: nowTs() }
         : { riskFlag: false, riskReason: null, riskFlaggedAt: null });
 }
 
-export async function deletePatient(id: number, ownerId: number): Promise<void> {
+export async function deletePatient(id: number, ownerId: number, caller: AppUser): Promise<void> {
     await tx(async (db) => {
         await getPatientById(db, id, ownerId);
+        await assertCanDeleteClient(db, caller, id);
         await db.exec("DELETE FROM notification_log WHERE appointment_id IN (SELECT id FROM appointment WHERE patient_id = $1)", [id]);
         await db.exec("DELETE FROM invoice_payment WHERE invoice_id IN (SELECT id FROM invoice WHERE patient_id = $1)", [id]);
         await db.exec("DELETE FROM invoice WHERE patient_id = $1", [id]);
@@ -91,6 +95,7 @@ export async function deletePatient(id: number, ownerId: number): Promise<void> 
             "OR new_appointment_id IN (SELECT id FROM appointment WHERE patient_id = $1)", [id]);
         await db.exec("DELETE FROM follow_up WHERE patient_id = $1", [id]);
         await db.exec("DELETE FROM case_status_log WHERE patient_id = $1", [id]);
+        await db.exec("DELETE FROM patient_share WHERE patient_id = $1", [id]);
         await db.exec("UPDATE appointment SET previous_appointment_id = NULL WHERE patient_id = $1", [id]);
         await db.exec("DELETE FROM appointment WHERE patient_id = $1", [id]);
         await db.exec("DELETE FROM patient WHERE id = $1", [id]);
@@ -154,9 +159,10 @@ function sniffFamily(b: Buffer): string | null {
 }
 
 export async function uploadAttachment(
-    db: Db, patientId: number, ownerId: number, rawFileName: string | null, fileDataValue: string | null
+    db: Db, patientId: number, ownerId: number, caller: AppUser, rawFileName: string | null, fileDataValue: string | null
 ): Promise<PatientAttachmentDto> {
     await getPatientById(db, patientId, ownerId);
+    await assertCanEditJourney(db, caller, patientId);
     if (!fileDataValue || !fileDataValue.trim()) throw badRequest("No file data provided");
 
     const sanitized = sanitizeFileName(rawFileName);
@@ -208,7 +214,8 @@ export async function getAttachmentForDownload(
     return { fileName: a.fileName, fileType: a.fileType, bytes: Buffer.from(a.fileData, "base64") };
 }
 
-export async function deleteAttachment(db: Db, patientId: number, attachmentId: number, ownerId: number): Promise<void> {
+export async function deleteAttachment(db: Db, patientId: number, attachmentId: number, ownerId: number, caller: AppUser): Promise<void> {
+    await assertCanEditJourney(db, caller, patientId);
     const n = await db.exec(
         "DELETE FROM patient_attachment WHERE id = $1 AND patient_id = $2 AND psychologist_id = $3", [attachmentId, patientId, ownerId]);
     if (n === 0) throw notFound("Attachment not found");

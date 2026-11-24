@@ -7,6 +7,7 @@ import { Patient } from "../types";
 import * as avail from "../services/availability";
 import * as wf from "../services/workflow";
 import * as therapist from "../services/therapist";
+import * as sharing from "../services/sharing";
 import { buildMonthlyReport } from "../services/monthlyReport";
 
 // The Psyfos workflow API: the receptionist's booking helpers, session
@@ -76,6 +77,22 @@ export function registerWorkflowRoutes(): void {
     post("/patients/:id/follow-up", "user", async (c) =>
         wf.createFollowUpForClient(tenant(c), c.me(), pathId(c.params.id), await c.body()));
 
+    // ── Sharing a client with another therapist ──────────────────────────────
+    // GET tells the caller how they relate to the client (and so whether the
+    // profile is editable or read-only for them); POST/DELETE change who it's
+    // shared with. Under /patients, so the PATIENTS permission applies.
+    get("/patients/:id/shares", "user", async (c) => sharing.getShareState(c.db, c.me(), pathId(c.params.id)));
+
+    post("/patients/:id/shares", "user", async (c) => {
+        const body = await c.body();
+        const therapistId = optInt(body, "therapistId");
+        if (therapistId === null) throw badRequest("therapistId must not be null");
+        return tx((db) => sharing.shareClient(db, c.me(), pathId(c.params.id), therapistId));
+    });
+
+    del("/patients/:id/shares/:therapistId", "user", async (c) =>
+        tx((db) => sharing.unshareClient(db, c.me(), pathId(c.params.id), pathId(c.params.therapistId, "therapistId"))));
+
     // ── Follow-ups ───────────────────────────────────────────────────────────
     get("/follow-ups", "user", async (c) => {
         const doctor = c.query.get("doctorId");
@@ -94,7 +111,7 @@ export function registerWorkflowRoutes(): void {
         return wf.createFollowUpForClient(tenant(c), c.me(), patientId, body);
     });
 
-    patch("/follow-ups/:id", "user", async (c) => wf.updateFollowUp(c.db, pathId(c.params.id), tenant(c), await c.body()));
+    patch("/follow-ups/:id", "user", async (c) => wf.updateFollowUp(c.db, pathId(c.params.id), tenant(c), c.me(), await c.body()));
 
     post("/follow-ups/:id/book", "user", async (c) => {
         const body = await c.body();
@@ -108,10 +125,10 @@ export function registerWorkflowRoutes(): void {
         }));
     });
 
-    post("/follow-ups/:id/done", "user", async (c) => wf.markFollowUpDone(c.db, pathId(c.params.id), tenant(c)));
+    post("/follow-ups/:id/done", "user", async (c) => wf.markFollowUpDone(c.db, pathId(c.params.id), tenant(c), c.me()));
 
     del("/follow-ups/:id", "user", async (c) => {
-        await wf.cancelFollowUp(c.db, pathId(c.params.id), tenant(c));
+        await wf.cancelFollowUp(c.db, pathId(c.params.id), tenant(c), c.me());
         return noContent();
     });
 

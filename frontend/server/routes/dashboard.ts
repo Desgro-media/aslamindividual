@@ -113,25 +113,25 @@ export function registerDashboardRoutes(): void {
 
     patch("/patients/:id/details", "user", async (c) => {
         const body = await c.body();
-        return patients.updatePatientDetails(c.db, pathId(c.params.id), tenant(c), strOf(body.name), strOf(body.email), strOf(body.phone));
+        return patients.updatePatientDetails(c.db, pathId(c.params.id), tenant(c), c.me(), strOf(body.name), strOf(body.email), strOf(body.phone));
     });
 
     patch("/patients/:id/risk-flag", "user", async (c) => {
         const body = await c.body();
         if (body.riskFlag == null) throw badRequest("The request could not be read — please check the values you entered.");
         const flag = String(body.riskFlag).toLowerCase() === "true";
-        return patients.updateRiskFlag(c.db, pathId(c.params.id), tenant(c), flag, strOf(body.riskReason));
+        return patients.updateRiskFlag(c.db, pathId(c.params.id), tenant(c), c.me(), flag, strOf(body.riskReason));
     });
 
     del("/patients/:id", "user", async (c) => {
-        await patients.deletePatient(pathId(c.params.id), tenant(c));
+        await patients.deletePatient(pathId(c.params.id), tenant(c), c.me());
         return noContent();
     });
 
     // File attachments — body: { fileName, fileData: "data:<mime>;base64,..." }
     post("/patients/:id/attachments", "user", async (c) => {
         const body = await c.body();
-        return patients.uploadAttachment(c.db, pathId(c.params.id), tenant(c), strOf(body.fileName), strOf(body.fileData));
+        return patients.uploadAttachment(c.db, pathId(c.params.id), tenant(c), c.me(), strOf(body.fileName), strOf(body.fileData));
     });
     get("/patients/:id/attachments", "user", async (c) => patients.getAttachments(c.db, pathId(c.params.id), tenant(c)));
     get("/patients/:id/attachments/:attachmentId/download", "user", async (c) => {
@@ -147,7 +147,7 @@ export function registerDashboardRoutes(): void {
         });
     });
     del("/patients/:id/attachments/:attachmentId", "user", async (c) => {
-        await patients.deleteAttachment(c.db, pathId(c.params.id), pathId(c.params.attachmentId), tenant(c));
+        await patients.deleteAttachment(c.db, pathId(c.params.id), pathId(c.params.attachmentId), tenant(c), c.me());
         return noContent();
     });
 
@@ -156,7 +156,7 @@ export function registerDashboardRoutes(): void {
         const body = await c.body();
         const apptId = idOf(body.appointmentId);
         if (apptId === null) throw badRequest("The request could not be read — please check the values you entered.");
-        return notes.saveNote(c.db, apptId, tenant(c), body);
+        return notes.saveNote(c.db, apptId, tenant(c), body, c.me());
     });
     get("/notes/appointment/:id", "user", async (c) => {
         const n = await notes.getNoteByAppointment(c.db, pathId(c.params.id), tenant(c));
@@ -164,7 +164,7 @@ export function registerDashboardRoutes(): void {
     });
     get("/notes/patient/:id", "user", async (c) => notes.getNotesByPatient(c.db, pathId(c.params.id), tenant(c)));
     del("/notes/:id", "user", async (c) => {
-        await notes.deleteNote(c.db, pathId(c.params.id), tenant(c));
+        await notes.deleteNote(c.db, pathId(c.params.id), tenant(c), c.me());
         return noContent();
     });
 

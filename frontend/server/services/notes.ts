@@ -1,7 +1,8 @@
 import type { Db } from "../db";
 import { JsonObject, badRequest, notFound } from "../http";
 import { today } from "../time";
-import { MoodLog, SessionNote } from "../types";
+import { AppUser, MoodLog, SessionNote } from "../types";
+import { assertCanEditJourney } from "./sharing";
 
 // ── SOAP session notes ───────────────────────────────────────────────────────
 
@@ -22,11 +23,18 @@ const str = (body: JsonObject, key: string): string | null => {
     return v === undefined || v === null ? null : String(v);
 };
 
-/** Create or update the SOAP note for an appointment (own tenant only). Fields not sent are left alone. */
-export async function saveNote(db: Db, appointmentId: number, ownerId: number, body: JsonObject): Promise<SessionNoteDto> {
+/**
+ * Create or update the SOAP note for an appointment (own tenant only). Fields not sent are left alone.
+ * Pass the signed-in `editor` so a clinic therapist can only write notes for clients on their
+ * caseload (own or shared); internal callers that already checked leave it out.
+ */
+export async function saveNote(
+    db: Db, appointmentId: number, ownerId: number, body: JsonObject, editor?: AppUser
+): Promise<SessionNoteDto> {
     const appt = await db.one<{ id: number; patientId: number }>(
         "SELECT id, patient_id FROM appointment WHERE id = $1 AND psychologist_id = $2", [appointmentId, ownerId]);
     if (!appt) throw notFound(`Appointment not found: ${appointmentId}`);
+    if (editor) await assertCanEditJourney(db, editor, appt.patientId);
 
     const fields = {
         subjective: str(body, "subjective"), objective: str(body, "objective"),
@@ -57,7 +65,12 @@ export async function getNotesByPatient(db: Db, patientId: number, ownerId: numb
     return rows.map(toDto);
 }
 
-export async function deleteNote(db: Db, noteId: number, ownerId: number): Promise<void> {
+export async function deleteNote(db: Db, noteId: number, ownerId: number, editor?: AppUser): Promise<void> {
+    if (editor) {
+        const note = await db.one<{ patientId: number }>(
+            "SELECT patient_id FROM session_note WHERE id = $1 AND psychologist_id = $2", [noteId, ownerId]);
+        if (note) await assertCanEditJourney(db, editor, note.patientId);
+    }
     await db.exec("DELETE FROM session_note WHERE id = $1 AND psychologist_id = $2", [noteId, ownerId]);
 }
 
